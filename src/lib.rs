@@ -1,88 +1,138 @@
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
+use std::collections::hash_map::Entry;
 use std::io;
-use std::net::{SocketAddr, ToSocketAddrs, UdpSocket};
+use std::net::{IpAddr, Ipv4Addr, SocketAddr};
+use std::ops::Index;
+use std::sync::Arc;
+use tokio::net::{lookup_host, ToSocketAddrs, UdpSocket};
 
 struct UnetServer {
+    name: String,
     socket: UdpSocket,
+    connections: HashMap<SocketAddr, UnetClient>
 }
 
 impl UnetServer {
-    fn bind<A: ToSocketAddrs>(addr: A) -> io::Result<Self> {
-        let socket = UdpSocket::bind(addr)?;
-        Ok(Self { socket })
+    async fn bind<A: ToSocketAddrs>(addr: A, name: String) -> io::Result<Self> {
+        let socket = UdpSocket::bind(addr).await?;
+        println!(
+            "new UnetServer [{name}] | local: {}",
+            socket.local_addr().unwrap(),
+        );
+        Ok(Self { name, socket, connections: HashMap::new() })
     }
 
-    fn accept(&self) -> UnetConnection {
-        let mut connections: HashSet<SocketAddr> = HashSet::new();
-
+    async fn accept(&mut self) -> UnetClient {
         loop {
-            let mut buf: [u8; 64] = [0; 64];
-            let (n, addr) = match self.socket.recv_from(&mut buf) {
+            let mut buf: [u8; 2] = [0; 2];
+            let (n, addr) = match self.socket.recv_from(&mut buf).await {
                 Ok((n, addr)) => (n, addr),
 
                 Err(_) => todo!(),
             };
 
-            if !connections.contains(&addr) {
-                connections.insert(addr);
-                return UnetConnection::connect(addr);
+            dbg!(&buf);
+
+            dbg!(&self.connections);
+            if !self.connections.contains_key(&addr) {
+                println!("Connections doesn't contain {addr} | connections len: {}", self.connections.len());
+                let client = UnetClient::connect(addr, format!("Accept | {}", self.connections.len())).await;
+                client.socket.connect(addr).await.unwrap();
+                self.connections.insert(addr, client.clone());
+                return client;
             } else {
+                println!("Connections contains {addr}");
+
+                let entry = match self.connections.entry(addr) {
+                    Entry::Occupied(occupied) => {occupied}
+                    Entry::Vacant(_) => {continue;}
+                };
+                let client = entry.get();
+                client.send_buf(&buf).await.unwrap();
+
+
                 continue;
             }
         }
     }
 }
 
-struct UnetConnection {
-    socket: UdpSocket,
-    target: SocketAddr,
+#[derive(Clone, Debug)]
+struct UnetClient {
+    name: String,
+    socket: Arc<UdpSocket>,
 }
 
-impl UnetConnection {
-    fn connect<T: ToSocketAddrs>(target: T) -> Self {
-        let socket = UdpSocket::bind("0.0.0.0:0").unwrap();
-        let mut iter = target.to_socket_addrs().unwrap();
-        Self {
-            socket,
-            target: iter.next().unwrap(),
-        }
+impl UnetClient {
+    async fn connect<T: ToSocketAddrs>(target: T, name: String) -> Self {
+        let socket = UdpSocket::bind("0.0.0.0:0").await.unwrap();
+        socket.connect(target).await.unwrap();
+        println!(
+            "new UnetClient [{name}] | local: {} | peer: {}",
+            socket.local_addr().unwrap(),
+            socket.peer_addr().unwrap()
+        );
+        // let target = socket.peer_addr().unwrap();
+        // let target = lookup_host(target).await.unwrap().next().unwrap();
+        Self { name, socket: Arc::new(socket) }
     }
 
-    fn send(&self, frame: Frame) -> io::Result<usize> {
-        let buf: [u8; 64] = [0; 64];
-        self.socket.send_to(&buf, self.target)
+    async fn send(&self, frame: Frame) -> io::Result<usize> {
+        let mut buf: [u8; 64] = [0; 64];
+        buf[0] = frame.0;
+        self.socket.send(&buf).await
     }
 
-    fn receive(&self) -> io::Result<Frame> {
-        loop {
-            let mut buf: [u8; 64] = [0; 64];
-            let (n, addr) = self.socket.recv_from(&mut buf)?;
-            if addr != self.target {
-                eprintln!("addr != self.target: {addr} | {}", self.target);
-                continue;
-            }
-            Ok(Frame(0));
-        }
+    async fn send_buf(&self, buf: &[u8]) -> io::Result<usize> {
+        println!("[{}] send_buf: {:?}", self.name, buf);
+        self.socket.send(&buf).await
+        // Ok(0)
+    }
+
+    async fn receive(&self) -> io::Result<Frame> {
+        let mut buf: [u8; 2] = [0; 2];
+        println!("before UnetConnection::receive() | buf: {buf:#?}");
+        let n= self.socket.recv(&mut buf).await?;
+        panic!("yolo");
+        println!("after UnetConnection::receive() | buf: {buf:#?}");
+        Ok(Frame(0))
     }
 }
 
-struct Frame(i32);
+struct Frame(u8);
 
 #[cfg(test)]
 mod tests {
-    use crate::{Frame, UnetServer};
-    use std::net::TcpListener;
+    use std::time::Duration;
+    use crate::{Frame, UnetClient, UnetServer};
 
-    fn test() {
-        let l = TcpListener::bind("127.0.0.1:10001").unwrap();
-        l.accept();
+    async fn handle_connection(connection: UnetClient) {
+        println!("Got connection!!!: {connection:#?}");
+        loop {
+            println!("Before receive");
+            let frame = connection.receive().await.unwrap();
+            println!("After receive");
+        }
+
     }
 
-    #[test]
-    fn test1() {
-        let server = UnetServer::bind("127.0.0.1:10001").unwrap();
-        loop {
-            let connection = server.accept();
-        }
+    #[tokio::test]
+    async fn create_server() {
+        let addr = "127.0.0.1:10001";
+        let handle1 = tokio::spawn(async move {
+            let mut server = UnetServer::bind(addr, "Main Server".to_string()).await.unwrap();
+            loop {
+                let connection = server.accept().await;
+                tokio::spawn(async { handle_connection(connection).await });
+            }
+        });
+        let handle2 = tokio::spawn(async move {
+            let unet = UnetClient::connect(addr, "Client 1".to_string()).await;
+            let n = unet.send(Frame(11)).await.unwrap();
+            tokio::time::sleep(Duration::from_millis(8000)).await;
+            let n = unet.send(Frame(23)).await.unwrap();
+        });
+
+        let (r1, r2) = tokio::join!(handle1, handle2);
     }
 }
