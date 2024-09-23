@@ -1,3 +1,12 @@
+pub mod challenge_response;
+pub mod connection_request;
+pub mod disconnect;
+pub mod keep_alive;
+
+use crate::packet::challenge_response::ChallengeResponse;
+use crate::packet::connection_request::ConnectionRequest;
+use crate::packet::disconnect::Disconnect;
+use crate::packet::keep_alive::KeepAlive;
 use rand::random;
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
@@ -11,15 +20,21 @@ impl UnetId {
     }
 }
 
+impl Default for UnetId {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 #[repr(u8)]
 pub enum Packet {
     ConnectionRequest(ConnectionRequest) = 0,
     ChallengeRequest = 1,
-    ChallengeResponse = 2,
-    KeepAlive = 3,
+    ChallengeResponse(ChallengeResponse) = 2,
+    KeepAlive(KeepAlive) = 3,
     Data = 4,
-    Disconnect = 5,
+    Disconnect(Disconnect) = 5,
     Unimplemented,
 }
 
@@ -37,10 +52,16 @@ impl Packet {
                 Packet::ConnectionRequest(connection_request)
             }
             1 => Packet::ChallengeRequest,
-            2 => Packet::ChallengeResponse,
-            3 => Packet::KeepAlive,
+            2 => Packet::ChallengeResponse(ChallengeResponse::from_bytes(&bytes[1..])),
+            3 => {
+                let keep_alive = KeepAlive::from_bytes(&bytes[1..]);
+                Packet::KeepAlive(keep_alive)
+            }
             4 => Packet::Data,
-            5 => Packet::Disconnect,
+            5 => {
+                let disconnect = Disconnect::from_bytes(&bytes[1..]);
+                Packet::Disconnect(disconnect)
+            }
             _ => Packet::Unimplemented,
         };
 
@@ -55,9 +76,18 @@ impl Packet {
                 output.append(&mut bytes);
             }
             Packet::ChallengeRequest => {}
-            Packet::ChallengeResponse => {}
-            Packet::Disconnect => {}
-            Packet::KeepAlive => {}
+            Packet::ChallengeResponse(challenge_response) => {
+                let mut bytes = challenge_response.as_bytes();
+                output.append(&mut bytes);
+            }
+            Packet::Disconnect(disconnect) => {
+                let mut bytes = disconnect.as_bytes();
+                output.append(&mut bytes);
+            }
+            Packet::KeepAlive(keep_alive) => {
+                let mut bytes = keep_alive.as_bytes();
+                output.append(&mut bytes);
+            }
             Packet::Data => {}
             Packet::Unimplemented => {}
         }
@@ -69,23 +99,37 @@ impl Packet {
         match self {
             Packet::ConnectionRequest(_) => 0,
             Packet::ChallengeRequest => 1,
-            Packet::ChallengeResponse => 2,
-            Packet::KeepAlive => 3,
+            Packet::ChallengeResponse(_) => 2,
+            Packet::KeepAlive(_) => 3,
             Packet::Data => 4,
-            Packet::Disconnect => 5,
+            Packet::Disconnect(_) => 5,
             Packet::Unimplemented => 6,
+        }
+    }
+
+    pub fn header(&self) -> Header {
+        match self {
+            Packet::ConnectionRequest(connection_request) => connection_request.header,
+            Packet::ChallengeRequest => todo!(),
+            Packet::ChallengeResponse(challenge_response) => challenge_response.header,
+            Packet::KeepAlive(keep_alive) => keep_alive.header,
+            Packet::Data => todo!(),
+            Packet::Disconnect(disconnect) => disconnect.header,
+            Packet::Unimplemented => todo!(),
         }
     }
 }
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 #[repr(C)]
-pub struct ConnectionRequest {
+pub struct Header {
     pub protocol_version: [u8; 5],
     pub client_id: UnetId,
 }
 
-impl ConnectionRequest {
+impl Header {
+    const SIZE: usize = size_of::<[u8; 5]>() + size_of::<UnetId>();
+
     pub fn new(client_id: UnetId) -> Self {
         Self {
             protocol_version: *b"UNET1",
@@ -94,9 +138,7 @@ impl ConnectionRequest {
     }
 
     pub fn from_bytes(bytes: &[u8]) -> Self {
-        println!("ConnectionRequest::from_bytes(): {bytes:#?}");
-        let sz = size_of::<[u8; 5]>() + size_of::<UnetId>();
-        assert_eq!(bytes.len(), sz);
+        assert_eq!(bytes.len(), Self::SIZE);
 
         let protocol_version: [u8; 5] = [bytes[0], bytes[1], bytes[2], bytes[3], bytes[4]];
         let client_id = UnetId(u64::from_be_bytes([

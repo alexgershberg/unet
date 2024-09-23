@@ -1,12 +1,20 @@
-use crate::packet::{ConnectionRequest, Packet, UnetId};
-use crate::BUF_SIZE;
+use crate::debug::{recv_dbg, send_dbg};
+use crate::packet::challenge_response::ChallengeResponse;
+use crate::packet::connection_request::ConnectionRequest;
+use crate::packet::disconnect::DisconnectReason;
+use crate::packet::keep_alive::KeepAlive;
+use crate::packet::{Packet, UnetId};
+use crate::{BUF_SIZE, SERVER_NOT_RESPONDING_TIMEOUT};
+use colored::Colorize;
 use std::io;
 use std::net::{ToSocketAddrs, UdpSocket};
+use std::process::exit;
 use std::rc::Rc;
+use std::time::Instant;
 
 #[derive(Copy, Clone, Debug, PartialEq)]
 pub enum ClientState {
-    Disconnected,
+    Disconnected(DisconnectReason),
     SendingConnectionRequest,
     SendingConnectionResponse,
     Connected,
@@ -17,6 +25,7 @@ pub struct UnetClient {
     id: UnetId,
     socket: Rc<UdpSocket>,
     state: ClientState,
+    pub time_since_last_packet_received: Instant,
 }
 
 impl UnetClient {
@@ -31,6 +40,7 @@ impl UnetClient {
             id,
             socket: Rc::new(socket),
             state: ClientState::SendingConnectionRequest,
+            time_since_last_packet_received: Instant::now(),
         };
 
         Ok(client)
@@ -39,6 +49,11 @@ impl UnetClient {
     pub fn update(&mut self) {
         self.receive_packets();
         self.send_packets();
+
+        if !self.check_server_response_ok() {
+            println!("[{}]", "Server not responding".truecolor(255, 0, 255));
+            exit(0)
+        }
     }
 
     fn send(&self, buf: &[u8]) -> io::Result<usize> {
@@ -46,7 +61,7 @@ impl UnetClient {
     }
 
     fn send_packet(&self, packet: Packet) -> io::Result<usize> {
-        println!("[send]: {packet:?}");
+        send_dbg(packet, None);
         let bytes = packet.as_bytes();
         self.send(&bytes)
     }
@@ -58,12 +73,24 @@ impl UnetClient {
                     .unwrap();
             }
             ClientState::SendingConnectionResponse => {
-                self.send_packet(Packet::ChallengeResponse).unwrap();
+                self.send_packet(Packet::ChallengeResponse(ChallengeResponse::new(self.id)))
+                    .unwrap();
             }
             ClientState::Connected => {
-                self.send_packet(Packet::KeepAlive).unwrap();
+                self.send_packet(Packet::KeepAlive(KeepAlive::new(self.id)))
+                    .unwrap();
             }
-            ClientState::Disconnected => {}
+            ClientState::Disconnected(reason) => {
+                match reason {
+                    DisconnectReason::Timeout => {
+                        println!("[{}]", "Client timed out".truecolor(255, 0, 255));
+                    }
+                    DisconnectReason::ServerFull => {
+                        println!("[{}]", "Server was full".truecolor(255, 0, 255));
+                    }
+                }
+                exit(0)
+            }
         }
     }
 
@@ -90,19 +117,20 @@ impl UnetClient {
     }
 
     fn handle_packet(&mut self, packet: Packet) {
-        println!("[recv]: {packet:?}");
+        recv_dbg(packet, None);
+        self.reset_timeout();
         match packet {
             Packet::ChallengeRequest => {
                 if self.state == ClientState::SendingConnectionRequest {
                     self.state = ClientState::SendingConnectionResponse;
                 }
             }
-            Packet::Disconnect => {
-                if self.state != ClientState::Disconnected {
-                    self.state = ClientState::Disconnected;
+            Packet::Disconnect(disconnect) => {
+                if !matches!(self.state, ClientState::Disconnected(..)) {
+                    self.state = ClientState::Disconnected(disconnect.reason)
                 }
             }
-            Packet::KeepAlive => {
+            Packet::KeepAlive(keep_alive) => {
                 if self.state == ClientState::SendingConnectionResponse {
                     self.state = ClientState::Connected;
                 }
@@ -112,6 +140,14 @@ impl UnetClient {
                 panic!("Client should never get this packet: {packet:#?}");
             }
         };
+    }
+
+    fn reset_timeout(&mut self) {
+        self.time_since_last_packet_received = Instant::now()
+    }
+
+    fn check_server_response_ok(&mut self) -> bool {
+        self.time_since_last_packet_received.elapsed() < SERVER_NOT_RESPONDING_TIMEOUT
     }
 }
 

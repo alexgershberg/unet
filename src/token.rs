@@ -12,7 +12,10 @@ impl ConnectToken {
             .unwrap()
             .as_secs();
         let expire_timestamp = create_timestamp + expire_seconds;
-        Self { create_timestamp , expire_timestamp}
+        Self {
+            create_timestamp,
+            expire_timestamp,
+        }
     }
 }
 
