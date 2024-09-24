@@ -1,7 +1,6 @@
 use crate::packet::{Header, UnetId};
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
-#[repr(C)]
 pub struct ConnectionRequest {
     pub header: Header,
 }
@@ -14,7 +13,8 @@ impl ConnectionRequest {
     }
 
     pub fn from_bytes(bytes: &[u8]) -> Self {
-        let header = Header::from_bytes(&bytes);
+        let header = Header::from_bytes(&bytes[..Header::SIZE]);
+
         Self { header }
     }
 

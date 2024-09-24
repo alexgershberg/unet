@@ -10,7 +10,7 @@ use unet::packet::Packet;
 fn main() {
     let (rx, tx) = channel();
     let j1 = thread::spawn(move || {
-        let mut client = UnetClient::new("127.0.0.1:10010").unwrap();
+        let mut client = UnetClient::new("127.0.0.1:10010", None).unwrap();
 
         loop {
             while let Ok(val) = tx.try_recv() {

@@ -1,4 +1,3 @@
-use crate::debug::{recv_dbg, send_dbg};
 use crate::packet::challenge_response::ChallengeResponse;
 use crate::packet::connection_request::ConnectionRequest;
 use crate::packet::disconnect::DisconnectReason;
@@ -8,9 +7,10 @@ use crate::{BUF_SIZE, KEEP_ALIVE_FREQUENCY, SERVER_NOT_RESPONDING_TIMEOUT};
 use colored::Colorize;
 use std::collections::VecDeque;
 use std::io;
-use std::net::{ToSocketAddrs, UdpSocket};
+use std::net::{SocketAddr, ToSocketAddrs, UdpSocket};
 use std::process::exit;
 use std::time::Instant;
+use crate::debug::BLUE;
 
 #[derive(Copy, Clone, Debug, PartialEq)]
 pub enum ClientState {
@@ -23,6 +23,8 @@ pub enum ClientState {
 #[derive(Debug)]
 pub struct UnetClient {
     pub id: UnetId,
+    target: SocketAddr,
+    pub server_index: Option<usize>,
     socket: UdpSocket,
     state: ClientState,
     send_queue: VecDeque<Packet>,
@@ -31,15 +33,20 @@ pub struct UnetClient {
 }
 
 impl UnetClient {
-    pub fn new<T: ToSocketAddrs>(target: T) -> io::Result<Self> {
+    pub fn new<T: ToSocketAddrs + Clone + Copy>(target: T, id: Option<UnetId>) -> io::Result<Self> {
         let socket = UdpSocket::bind("0.0.0.0:0")?;
         socket.set_nonblocking(true)?;
-        socket.connect(target).unwrap();
+        socket.connect(target)?;
 
-        let id = UnetId::new();
+        let mut client_id = UnetId::new();
+        if let Some(id) = id {
+            client_id = id;
+        }
 
         let client = Self {
-            id,
+            id: client_id,
+            target: target.to_socket_addrs().unwrap().next().unwrap(),
+            server_index: None,
             socket,
             state: ClientState::SendingConnectionRequest,
             send_queue: VecDeque::new(),
@@ -47,6 +54,7 @@ impl UnetClient {
             time_since_last_packet_received: Instant::now(),
         };
 
+        connecting_dbg(client_id, target.to_socket_addrs().unwrap().next().unwrap());
         Ok(client)
     }
 
@@ -55,8 +63,8 @@ impl UnetClient {
         self.send_packets();
 
         if !self.check_server_response_ok() {
-            println!("[{}]", "Server not responding".truecolor(255, 0, 255));
-            exit(0)
+            disconnect_dbg(self.id, self.target, "Server not responding".to_string());
+            exit(0);
         }
     }
 
@@ -71,7 +79,7 @@ impl UnetClient {
     }
 
     fn send_packet(&mut self, packet: Packet) -> io::Result<usize> {
-        send_dbg(packet, None);
+        // send_dbg(packet, None);
         let bytes = packet.as_bytes();
         self.internal_send(&bytes)
     }
@@ -100,10 +108,12 @@ impl UnetClient {
             ClientState::Disconnected(reason) => {
                 match reason {
                     DisconnectReason::Timeout => {
-                        println!("[{}]", "Client timed out".truecolor(255, 0, 255));
+                        disconnect_dbg(self.id,self.target, "Client timed out".to_string());
+                        // println!("[{}]", "Client timed out".truecolor(255, 0, 255));
                     }
                     DisconnectReason::ServerFull => {
-                        println!("[{}]", "Server was full".truecolor(255, 0, 255));
+                        disconnect_dbg(self.id,self.target, "Server was full".to_string());
+                        // println!("[{}]", "Server was full".truecolor(255, 0, 255));
                     }
                 }
                 exit(0)
@@ -134,7 +144,7 @@ impl UnetClient {
     }
 
     fn handle_packet(&mut self, packet: Packet) {
-        recv_dbg(packet, None);
+        // recv_dbg(packet, None);
         self.reset_timeout();
         match packet {
             Packet::ChallengeRequest => {
@@ -150,6 +160,7 @@ impl UnetClient {
             Packet::KeepAlive(keep_alive) => {
                 if self.state == ClientState::SendingConnectionResponse {
                     self.state = ClientState::Connected;
+                    connected_dbg(self.id, self.target);
                 }
             }
             Packet::Data(_) => {}
@@ -172,8 +183,38 @@ impl UnetClient {
     }
 }
 
+pub fn connecting_dbg(id: UnetId, to: SocketAddr) {
+    println!(
+        "{} connecting to server {}...",
+        format!("{:16x}", id.0).truecolor(BLUE.r, BLUE.g, BLUE.b),
+        to.to_string().truecolor(255, 215, 0),
+    )
+}
+
+pub fn connected_dbg(id: UnetId, to: SocketAddr) {
+    println!(
+        "{} connected!",
+        format!("{:16x}", id.0).truecolor(BLUE.r, BLUE.g, BLUE.b),
+    )
+}
+
+pub fn disconnect_dbg(id: UnetId, to: SocketAddr, disconnect_message: String) {
+    println!(
+        "{} disconnected from server {} | {}",
+        format!("{:16x}", id.0).truecolor(BLUE.r, BLUE.g, BLUE.b),
+        to.to_string().truecolor(255, 215, 0),
+        disconnect_message
+    )
+}
+
 #[cfg(test)]
 mod tests {
+    use crate::client::{connected_dbg, connecting_dbg, disconnect_dbg};
+    use crate::packet::UnetId;
+
     #[test]
-    fn basic() {}
+    fn preview() {
+        connecting_dbg(UnetId(u64::MAX), "255.255.255.255:65535".parse().unwrap());
+        connecting_dbg(UnetId(0xdeadbeef), "0.0.0.0:0".parse().unwrap());
+    }
 }

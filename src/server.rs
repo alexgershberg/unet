@@ -1,8 +1,9 @@
-use crate::debug::{recv_dbg, send_dbg};
+use crate::debug::{client_connect_dbg, client_disconnect_dbg, recv_dbg, send_dbg};
 use crate::packet::disconnect::{Disconnect, DisconnectReason};
 use crate::packet::keep_alive::KeepAlive;
 use crate::packet::{Packet, UnetId};
 use crate::{BUF_SIZE, CLIENT_CONNECTION_TIMEOUT, KEEP_ALIVE_FREQUENCY, MAX_CONNECTIONS};
+use std::collections::VecDeque;
 use std::io;
 use std::net::{SocketAddr, ToSocketAddrs, UdpSocket};
 use std::time::Instant;
@@ -46,7 +47,8 @@ impl Connection {
 #[derive(Debug)]
 pub struct UnetServer {
     socket: UdpSocket,
-    connections: [Option<Connection>; MAX_CONNECTIONS],
+    pub connections: [Option<Connection>; MAX_CONNECTIONS],
+    receive_buffer: VecDeque<(Packet, SocketAddr)>,
 }
 
 impl UnetServer {
@@ -58,11 +60,13 @@ impl UnetServer {
         Ok(Self {
             socket,
             connections,
+            receive_buffer: VecDeque::new(),
         })
     }
 
     pub fn update(&mut self) {
         self.receive_packets();
+        self.handle_packets();
         self.send_packets();
         self.kick_timed_out_connections();
     }
@@ -116,6 +120,12 @@ impl UnetServer {
 
     fn receive_packets(&mut self) {
         while let Some((packet, from)) = self.receive_packet() {
+            self.receive_buffer.push_back((packet, from));
+        }
+    }
+
+    fn handle_packets(&mut self) {
+        while let Some((packet, from)) = self.receive_buffer.pop_back() {
             self.handle_packet(packet, from)
         }
     }
@@ -123,34 +133,16 @@ impl UnetServer {
     fn handle_packet(&mut self, packet: Packet, from: SocketAddr) {
         let header = packet.header();
         let connection_identifier = ConnectionIdentifier::new(header.client_id, from);
-        recv_dbg(packet, Some(connection_identifier));
+        // recv_dbg(packet, Some(connection_identifier));
         self.reset_timeout_for_connection(ConnectionIdentifier::new(header.client_id, from));
         match packet {
             Packet::ConnectionRequest(connection_request) => {
-                if self
-                    .find_client_index_by_connection_identifier(connection_identifier)
-                    .is_some()
-                {
-                    // Already connected, just ignore
-                    return;
+                if self.accept_connection(connection_identifier) {
+                    let index = self
+                        .find_client_index_by_connection_identifier(connection_identifier)
+                        .unwrap();
+                    client_connect_dbg(connection_identifier, index)
                 }
-
-                if let Some(index) = self.find_vacant_space() {
-                    self.connections[index] = Some(Connection {
-                        connection_identifier,
-                        time_since_last_packet_sent: Instant::now(),
-                        time_since_last_packet_received: Instant::now(),
-                    });
-                } else {
-                    self.send_disconnect_packet(
-                        connection_identifier,
-                        DisconnectReason::ServerFull,
-                    );
-
-                    return;
-                }
-
-                self.send_challenge_packet(connection_identifier);
             }
             Packet::ChallengeResponse(challenge_response) => {
                 let header = challenge_response.header;
@@ -168,6 +160,32 @@ impl UnetServer {
                 panic!("server got weird packet: {packet:#?}");
             }
         };
+    }
+
+    fn accept_connection(&mut self, connection_identifier: ConnectionIdentifier) -> bool {
+        if self
+            .find_client_index_by_connection_identifier(connection_identifier)
+            .is_some()
+        {
+            // Already connected, just ignore
+            return false;
+        }
+
+        if let Some(index) = self.find_vacant_space() {
+            self.connections[index] = Some(Connection {
+                connection_identifier,
+                time_since_last_packet_sent: Instant::now(),
+                time_since_last_packet_received: Instant::now(),
+            });
+        } else {
+            self.send_disconnect_packet(connection_identifier, DisconnectReason::ServerFull);
+
+            return false;
+        }
+
+        self.send_challenge_packet(connection_identifier);
+
+        true
     }
 
     fn find_client_index_by_connection_identifier(
@@ -246,6 +264,7 @@ impl UnetServer {
         {
             assert!(self.connections[index].is_some());
             if let Some(connection) = self.connections[index].take() {
+                client_disconnect_dbg(connection_identifier, index);
                 self.send_disconnect_packet(connection.connection_identifier, reason)
             }
         } else {

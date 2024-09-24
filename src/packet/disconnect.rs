@@ -1,3 +1,4 @@
+use std::fmt::{Display, Formatter};
 use crate::packet::{Header, UnetId};
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
