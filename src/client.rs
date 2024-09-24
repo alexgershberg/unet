@@ -4,12 +4,12 @@ use crate::packet::connection_request::ConnectionRequest;
 use crate::packet::disconnect::DisconnectReason;
 use crate::packet::keep_alive::KeepAlive;
 use crate::packet::{Packet, UnetId};
-use crate::{BUF_SIZE, SERVER_NOT_RESPONDING_TIMEOUT};
+use crate::{BUF_SIZE, KEEP_ALIVE_FREQUENCY, SERVER_NOT_RESPONDING_TIMEOUT};
 use colored::Colorize;
+use std::collections::VecDeque;
 use std::io;
 use std::net::{ToSocketAddrs, UdpSocket};
 use std::process::exit;
-use std::rc::Rc;
 use std::time::Instant;
 
 #[derive(Copy, Clone, Debug, PartialEq)]
@@ -20,11 +20,13 @@ pub enum ClientState {
     Connected,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Debug)]
 pub struct UnetClient {
-    id: UnetId,
-    socket: Rc<UdpSocket>,
+    pub id: UnetId,
+    socket: UdpSocket,
     state: ClientState,
+    send_queue: VecDeque<Packet>,
+    pub time_since_last_packet_sent: Instant,
     pub time_since_last_packet_received: Instant,
 }
 
@@ -38,8 +40,10 @@ impl UnetClient {
 
         let client = Self {
             id,
-            socket: Rc::new(socket),
+            socket,
             state: ClientState::SendingConnectionRequest,
+            send_queue: VecDeque::new(),
+            time_since_last_packet_sent: Instant::now(),
             time_since_last_packet_received: Instant::now(),
         };
 
@@ -56,17 +60,23 @@ impl UnetClient {
         }
     }
 
-    fn send(&self, buf: &[u8]) -> io::Result<usize> {
-        self.socket.send(buf)
+    pub fn send(&mut self, packet: Packet) {
+        self.send_queue.push_back(packet)
     }
 
-    fn send_packet(&self, packet: Packet) -> io::Result<usize> {
+    fn internal_send(&mut self, buf: &[u8]) -> io::Result<usize> {
+        let res = self.socket.send(buf);
+        self.time_since_last_packet_sent = Instant::now();
+        res
+    }
+
+    fn send_packet(&mut self, packet: Packet) -> io::Result<usize> {
         send_dbg(packet, None);
         let bytes = packet.as_bytes();
-        self.send(&bytes)
+        self.internal_send(&bytes)
     }
 
-    fn send_packets(&self) {
+    fn send_packets(&mut self) {
         match self.state {
             ClientState::SendingConnectionRequest => {
                 self.send_packet(Packet::ConnectionRequest(ConnectionRequest::new(self.id)))
@@ -77,8 +87,15 @@ impl UnetClient {
                     .unwrap();
             }
             ClientState::Connected => {
-                self.send_packet(Packet::KeepAlive(KeepAlive::new(self.id)))
-                    .unwrap();
+                if self.send_queue.is_empty() && self.should_send_keep_alive() {
+                    self.send_packet(Packet::KeepAlive(KeepAlive::new(self.id)))
+                        .unwrap();
+                    return;
+                }
+
+                while let Some(packet) = self.send_queue.pop_front() {
+                    self.send_packet(packet).unwrap();
+                }
             }
             ClientState::Disconnected(reason) => {
                 match reason {
@@ -135,7 +152,7 @@ impl UnetClient {
                     self.state = ClientState::Connected;
                 }
             }
-            Packet::Data => {}
+            Packet::Data(_) => {}
             _ => {
                 panic!("Client should never get this packet: {packet:#?}");
             }
@@ -148,6 +165,10 @@ impl UnetClient {
 
     fn check_server_response_ok(&mut self) -> bool {
         self.time_since_last_packet_received.elapsed() < SERVER_NOT_RESPONDING_TIMEOUT
+    }
+
+    fn should_send_keep_alive(&self) -> bool {
+        self.time_since_last_packet_sent.elapsed() > KEEP_ALIVE_FREQUENCY
     }
 }
 

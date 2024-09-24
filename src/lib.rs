@@ -8,5 +8,7 @@ pub mod token;
 
 pub const MAX_CONNECTIONS: usize = 3;
 pub const BUF_SIZE: usize = 64;
-pub const CONNECTION_TIMEOUT: Duration = Duration::from_secs(3);
-pub const SERVER_NOT_RESPONDING_TIMEOUT: Duration = Duration::from_secs(3);
+
+pub const CLIENT_CONNECTION_TIMEOUT: Duration = Duration::from_secs(4);
+pub const SERVER_NOT_RESPONDING_TIMEOUT: Duration = Duration::from_secs(4);
+pub const KEEP_ALIVE_FREQUENCY: Duration = Duration::from_millis(200);

@@ -1,10 +1,12 @@
 pub mod challenge_response;
 pub mod connection_request;
+pub mod data;
 pub mod disconnect;
 pub mod keep_alive;
 
 use crate::packet::challenge_response::ChallengeResponse;
 use crate::packet::connection_request::ConnectionRequest;
+use crate::packet::data::Data;
 use crate::packet::disconnect::Disconnect;
 use crate::packet::keep_alive::KeepAlive;
 use rand::random;
@@ -33,7 +35,7 @@ pub enum Packet {
     ChallengeRequest = 1,
     ChallengeResponse(ChallengeResponse) = 2,
     KeepAlive(KeepAlive) = 3,
-    Data = 4,
+    Data(Data) = 4,
     Disconnect(Disconnect) = 5,
     Unimplemented,
 }
@@ -57,7 +59,10 @@ impl Packet {
                 let keep_alive = KeepAlive::from_bytes(&bytes[1..]);
                 Packet::KeepAlive(keep_alive)
             }
-            4 => Packet::Data,
+            4 => {
+                let data = Data::from_bytes(&bytes[1..]);
+                Packet::Data(data)
+            }
             5 => {
                 let disconnect = Disconnect::from_bytes(&bytes[1..]);
                 Packet::Disconnect(disconnect)
@@ -88,7 +93,10 @@ impl Packet {
                 let mut bytes = keep_alive.as_bytes();
                 output.append(&mut bytes);
             }
-            Packet::Data => {}
+            Packet::Data(data) => {
+                let mut bytes = data.as_bytes();
+                output.append(&mut bytes);
+            }
             Packet::Unimplemented => {}
         }
 
@@ -101,7 +109,7 @@ impl Packet {
             Packet::ChallengeRequest => 1,
             Packet::ChallengeResponse(_) => 2,
             Packet::KeepAlive(_) => 3,
-            Packet::Data => 4,
+            Packet::Data(_) => 4,
             Packet::Disconnect(_) => 5,
             Packet::Unimplemented => 6,
         }
@@ -113,7 +121,7 @@ impl Packet {
             Packet::ChallengeRequest => todo!(),
             Packet::ChallengeResponse(challenge_response) => challenge_response.header,
             Packet::KeepAlive(keep_alive) => keep_alive.header,
-            Packet::Data => todo!(),
+            Packet::Data(data) => data.header,
             Packet::Disconnect(disconnect) => disconnect.header,
             Packet::Unimplemented => todo!(),
         }

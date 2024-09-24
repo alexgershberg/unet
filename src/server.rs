@@ -2,7 +2,7 @@ use crate::debug::{recv_dbg, send_dbg};
 use crate::packet::disconnect::{Disconnect, DisconnectReason};
 use crate::packet::keep_alive::KeepAlive;
 use crate::packet::{Packet, UnetId};
-use crate::{BUF_SIZE, CONNECTION_TIMEOUT, MAX_CONNECTIONS};
+use crate::{BUF_SIZE, CLIENT_CONNECTION_TIMEOUT, KEEP_ALIVE_FREQUENCY, MAX_CONNECTIONS};
 use std::io;
 use std::net::{SocketAddr, ToSocketAddrs, UdpSocket};
 use std::time::Instant;
@@ -21,16 +21,25 @@ impl ConnectionIdentifier {
 #[derive(Copy, Clone, Debug)]
 pub struct Connection {
     pub connection_identifier: ConnectionIdentifier,
+    pub time_since_last_packet_sent: Instant,
     pub time_since_last_packet_received: Instant,
 }
 
 impl Connection {
-    pub fn reset_timeout(&mut self) {
+    fn still_alive(&mut self) {
+        self.time_since_last_packet_sent = Instant::now();
+    }
+
+    fn should_send_keep_alive(&self) -> bool {
+        self.time_since_last_packet_sent.elapsed() > KEEP_ALIVE_FREQUENCY
+    }
+
+    fn reset_timeout(&mut self) {
         self.time_since_last_packet_received = Instant::now()
     }
 
-    pub fn timed_out(&self) -> bool {
-        self.time_since_last_packet_received.elapsed() > CONNECTION_TIMEOUT
+    fn timed_out(&self) -> bool {
+        self.time_since_last_packet_received.elapsed() > CLIENT_CONNECTION_TIMEOUT
     }
 }
 
@@ -58,20 +67,33 @@ impl UnetServer {
         self.kick_timed_out_connections();
     }
 
-    fn send_to(&self, buf: &[u8], to: SocketAddr) -> io::Result<usize> {
+    fn send_to(
+        &mut self,
+        buf: &[u8],
+        connection_identifier: ConnectionIdentifier,
+    ) -> io::Result<usize> {
+        let to = connection_identifier.addr;
+        if let Some(index) = self.find_client_index_by_connection_identifier(connection_identifier)
+        {
+            if let Some(connection) = &mut self.connections[index] {
+                connection.still_alive();
+            }
+        };
         self.socket.send_to(buf, to)
     }
 
-    fn send_packet_to(&self, packet: Packet, to: SocketAddr) -> io::Result<usize> {
+    fn send_packet_to(&mut self, packet: Packet, to: ConnectionIdentifier) -> io::Result<usize> {
         send_dbg(packet, Some(to));
 
         let bytes = packet.as_bytes();
         self.send_to(&bytes, to)
     }
 
-    fn send_packets(&self) {
+    fn send_packets(&mut self) {
         for connection in self.connections.into_iter().flatten() {
-            self.send_keep_alive_packet(connection.connection_identifier);
+            if connection.should_send_keep_alive() {
+                self.send_keep_alive_packet(connection.connection_identifier);
+            }
         }
     }
 
@@ -99,13 +121,12 @@ impl UnetServer {
     }
 
     fn handle_packet(&mut self, packet: Packet, from: SocketAddr) {
-        recv_dbg(packet, Some(from));
         let header = packet.header();
+        let connection_identifier = ConnectionIdentifier::new(header.client_id, from);
+        recv_dbg(packet, Some(connection_identifier));
         self.reset_timeout_for_connection(ConnectionIdentifier::new(header.client_id, from));
         match packet {
             Packet::ConnectionRequest(connection_request) => {
-                let header = connection_request.header;
-                let connection_identifier = ConnectionIdentifier::new(header.client_id, from);
                 if self
                     .find_client_index_by_connection_identifier(connection_identifier)
                     .is_some()
@@ -117,6 +138,7 @@ impl UnetServer {
                 if let Some(index) = self.find_vacant_space() {
                     self.connections[index] = Some(Connection {
                         connection_identifier,
+                        time_since_last_packet_sent: Instant::now(),
                         time_since_last_packet_received: Instant::now(),
                     });
                 } else {
@@ -128,7 +150,7 @@ impl UnetServer {
                     return;
                 }
 
-                self.send_challenge_packet(from);
+                self.send_challenge_packet(connection_identifier);
             }
             Packet::ChallengeResponse(challenge_response) => {
                 let header = challenge_response.header;
@@ -141,7 +163,7 @@ impl UnetServer {
                 self.kick(connection_identifier, disconnect.reason);
             }
             Packet::KeepAlive(_) => {}
-            Packet::Data => {}
+            Packet::Data(data) => {}
             _ => {
                 panic!("server got weird packet: {packet:#?}");
             }
@@ -181,27 +203,25 @@ impl UnetServer {
         index
     }
 
-    fn send_challenge_packet(&self, to: SocketAddr) {
+    fn send_challenge_packet(&mut self, connection_identifier: ConnectionIdentifier) {
         let packet = Packet::ChallengeRequest;
-        self.send_packet_to(packet, to).unwrap();
+        self.send_packet_to(packet, connection_identifier).unwrap();
     }
 
-    fn send_keep_alive_packet(&self, connection_identifier: ConnectionIdentifier) {
+    fn send_keep_alive_packet(&mut self, connection_identifier: ConnectionIdentifier) {
         let client_id = connection_identifier.id;
-        let to = connection_identifier.addr;
         let packet = Packet::KeepAlive(KeepAlive::new(client_id));
-        self.send_packet_to(packet, to).unwrap();
+        self.send_packet_to(packet, connection_identifier).unwrap();
     }
 
     fn send_disconnect_packet(
-        &self,
+        &mut self,
         connection_identifier: ConnectionIdentifier,
         reason: DisconnectReason,
     ) {
         let client_id = connection_identifier.id;
-        let to = connection_identifier.addr;
         let packet = Packet::Disconnect(Disconnect::new(client_id, reason));
-        self.send_packet_to(packet, to).unwrap();
+        self.send_packet_to(packet, connection_identifier).unwrap();
     }
 
     fn reset_timeout_for_connection(&mut self, connection_identifier: ConnectionIdentifier) {

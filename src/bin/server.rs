@@ -6,6 +6,6 @@ fn main() {
     let mut server = UnetServer::new("127.0.0.1:10010").unwrap();
     loop {
         server.update();
-        sleep(Duration::from_millis(1000));
+        sleep(Duration::from_millis(20));
     }
 }
