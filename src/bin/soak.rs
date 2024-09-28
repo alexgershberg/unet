@@ -11,13 +11,13 @@ async fn main() {
     let mut handles = vec![];
     for _ in 0..MAX_CONNECTIONS {
         let handle = tokio::spawn(async move {
-            let mut client = UnetClient::new("127.0.0.1:10010", None).unwrap();
+            let mut client = UnetClient::new().unwrap();
             let mut count = 0;
             loop {
+                sleep(Duration::from_secs(1)).await; // Without this Tokio only spawns ~7 clients, no idea why.
                 client.send(Packet::Data(Data::new(client.id, count)));
                 client.update();
                 count += 1;
-                sleep(Duration::from_millis(1)).await;
             }
         });
         handles.push(handle);

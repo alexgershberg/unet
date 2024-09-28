@@ -6,6 +6,7 @@ use crate::packet::disconnect::{Disconnect, DisconnectReason};
 use crate::packet::keep_alive::KeepAlive;
 use crate::packet::Packet;
 use crate::server::connection::{Connection, ConnectionIdentifier};
+use crate::tick::Tick;
 use crate::{BUF_SIZE, MAX_CONNECTIONS};
 use colored::Colorize;
 use std::collections::VecDeque;
@@ -20,15 +21,12 @@ pub struct UnetServer {
     pub connections: Vec<Option<Connection>>,
     receive_buffer: VecDeque<(Packet, SocketAddr)>,
     config: ServerConfig,
+    global_tick: Tick,
     previous: Instant,
     lag: u128,
 }
 
 impl UnetServer {
-    pub fn new() -> io::Result<Self> {
-        Self::from_config(ServerConfig::default())
-    }
-
     pub fn from_config(config: ServerConfig) -> io::Result<Self> {
         let socket = UdpSocket::bind(config.addr)?;
         socket.set_nonblocking(true)?;
@@ -39,6 +37,7 @@ impl UnetServer {
             connections,
             receive_buffer: VecDeque::new(),
             config,
+            global_tick: Tick { value: 0.0 },
             previous: Instant::now(),
             lag: 0,
         };
@@ -53,23 +52,29 @@ impl UnetServer {
         let elapsed = self.previous.elapsed();
 
         self.lag += elapsed.as_millis();
-        if self.lag >= self.config.ms_per_update {
-            self.print_state();
-            self.reset_connections_stats();
-            self.receive_packets();
-            self.handle_packets();
-            self.send_packets();
-            self.kick_timed_out_connections();
-            self.kick_spamming_connections();
-
-            self.lag -= self.config.ms_per_update;
+        if self.lag >= self.config.ms_per_tick {
+            self.tick();
+            self.lag -= self.config.ms_per_tick;
         } else {
             sleep(Duration::from_millis(
-                (self.config.ms_per_update - self.lag) as u64,
+                (self.config.ms_per_tick - self.lag) as u64,
             ));
         }
 
         self.previous = now;
+    }
+
+    pub fn tick(&mut self) {
+        self.reset_connections_stats();
+        self.receive_packets();
+        self.handle_packets();
+        self.send_packets();
+        self.print_state(); // Ok to re-order this print
+        self.kick_timed_out_connections();
+        self.kick_spamming_connections();
+        self.tick_connections();
+
+        self.global_tick.value += 1.0;
     }
 
     fn send_to(
@@ -146,7 +151,7 @@ impl UnetServer {
                 return;
             }
             connection.reset_timeout();
-            connection.packets_per_update_received += 1;
+            connection.packets_per_tick_received += 1.0;
             connection.packet_sequence += 1;
         } else if recv_debug {
             recv_dbg(packet, Some(connection_identifier), None);
@@ -188,14 +193,10 @@ impl UnetServer {
             return false;
         };
 
-        self.connections[index] = Some(Connection {
-            connection_identifier,
-            time_since_last_packet_sent: Instant::now(),
-            time_since_last_packet_received: Instant::now(),
-            packets_per_update_received: 0,
-            packet_sequence: 0,
-            index,
-        });
+        let mut connection = Connection::new(connection_identifier);
+        connection.config = self.config;
+        connection.index = index;
+        self.connections[index] = Some(connection);
 
         self.send_challenge_packet(connection_identifier);
 
@@ -278,9 +279,11 @@ impl UnetServer {
     }
 
     fn kick_spamming_connections(&mut self) {
-        for connection in &mut self.connections.clone().iter().flatten() {
-            if connection.is_spamming(self.config.max_packets_per_update) {
-                self.kick(connection.connection_identifier, DisconnectReason::Spam)
+        if let Some(max_rolling_packets_per_tick) = self.config.max_rolling_packets_per_tick {
+            for connection in &mut self.connections.clone().iter().flatten() {
+                if connection.is_spamming(max_rolling_packets_per_tick) {
+                    self.kick(connection.connection_identifier, DisconnectReason::Spam)
+                }
             }
         }
     }
@@ -297,9 +300,19 @@ impl UnetServer {
         }
     }
 
+    fn tick_connections(&mut self) {
+        for connection in self.connections.iter_mut().flatten() {
+            connection.ticks_since_last_packet_sent.value += 1.0;
+            connection.ticks_since_last_packet_received.value += 1.0;
+            connection
+                .rolling_packets_per_tick_received
+                .add(connection.packets_per_tick_received);
+        }
+    }
+
     fn reset_connections_stats(&mut self) {
         for connection in self.connections.iter_mut().flatten() {
-            connection.packets_per_update_received = 0;
+            connection.packets_per_tick_received = 0.0;
         }
     }
 
@@ -325,23 +338,31 @@ pub fn server_starting_dbg(server: &UnetServer) {
 
 pub fn connection_state_dbg(connection: &Connection) {
     println!(
-        r#"{:>16x}:    time_since_last_packet_received:   {:.2?}
-                     time_since_last_packet_send:       {:.2?}
+        r#"{:>16x}:     ticks_since_last_packet_received:   {:?}
+                      ticks_since_last_packet_sent:       {:?}
+                      packets_per_tick_received:          {:?}
+                      rolling_packets_per_tick_received:  {:?}
                 "#,
         connection.connection_identifier.id.0,
-        connection.time_since_last_packet_received.elapsed(),
-        connection.time_since_last_packet_sent.elapsed()
+        connection.ticks_since_last_packet_received,
+        connection.ticks_since_last_packet_sent,
+        connection.packets_per_tick_received,
+        connection.rolling_packets_per_tick_received.value(),
     );
 }
 
 #[cfg(test)]
 mod tests {
-    use crate::server::connection::Connection;
+    use crate::packet::UnetId;
+    use crate::server::connection::{Connection, ConnectionIdentifier};
     use crate::server::connection_state_dbg;
 
     #[test]
     fn preview() {
-        let connection = Connection::default();
+        let connection = Connection::new(ConnectionIdentifier::new(
+            UnetId(999),
+            "0.0.0.0:0".parse().unwrap(),
+        ));
         connection_state_dbg(&connection);
     }
 }

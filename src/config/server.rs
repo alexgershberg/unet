@@ -1,46 +1,54 @@
-use std::net::{IpAddr, SocketAddr};
-use std::str::FromStr;
+use crate::{
+    Tick, DEFAULT_CLIENT_CONNECTION_TIMEOUT, DEFAULT_KEEP_ALIVE_FREQUENCY, DEFAULT_SERVER_ADDR,
+    DEFAULT_TPS,
+};
+use std::net::SocketAddr;
 
 #[derive(Clone, Copy, Debug)]
 pub struct ServerConfig {
     pub addr: SocketAddr,
-    pub ups: f32,
-    pub ms_per_update: u128,
-    max_packets_per_second: f32,
-    pub max_packets_per_update: f32,
+    pub client_connection_timeout: Tick,
+    pub keep_alive_frequency: Tick,
+    pub tps: f32,
+    pub ms_per_tick: u128,
+    max_rolling_packets_per_second: Option<f32>,
+    pub max_rolling_packets_per_tick: Option<f32>, // If this is not specified, clients can spam as much as they want
     pub recv_debug: bool,
     pub send_debug: bool,
 }
 
 impl ServerConfig {
     pub fn new() -> Self {
-        let addr = SocketAddr::new(IpAddr::from_str("127.0.0.1").unwrap(), 10010);
-        let ups = 1.0;
-        let ms_per_update = (1000.0 / ups) as u128;
-        let max_packets_per_second = 50.0;
-        let max_packets_per_update = max_packets_per_update(max_packets_per_second, ups);
+        let addr = DEFAULT_SERVER_ADDR;
+        let client_connection_timeout = DEFAULT_CLIENT_CONNECTION_TIMEOUT;
+        let keep_alive_frequency = DEFAULT_KEEP_ALIVE_FREQUENCY;
+        let tps = DEFAULT_TPS;
+        let ms_per_tick = (1000.0 / tps) as u128;
+        let max_rolling_packets_per_tick = Some(3.0);
+        let max_rolling_packets_per_second = Some(max_rolling_packets_per_second(
+            max_rolling_packets_per_tick.unwrap(),
+            tps,
+        ));
 
         let recv_debug = true;
         let send_debug = true;
 
         Self {
             addr,
-            ups,
-            ms_per_update,
-            max_packets_per_second,
-            max_packets_per_update,
+            client_connection_timeout,
+            keep_alive_frequency,
+            tps,
+            ms_per_tick,
+            max_rolling_packets_per_second,
+            max_rolling_packets_per_tick,
             recv_debug,
             send_debug,
         }
     }
-}
 
-fn max_packets_per_second(max_packets_per_update: f32, ups: f32) -> f32 {
-    max_packets_per_update * ups
-}
-
-fn max_packets_per_update(max_packets_per_second: f32, ups: f32) -> f32 {
-    max_packets_per_second / ups
+    pub fn test() -> Self {
+        todo!()
+    }
 }
 
 impl Default for ServerConfig {
@@ -49,21 +57,35 @@ impl Default for ServerConfig {
     }
 }
 
+fn max_rolling_packets_per_second(max_packets_per_tick: f32, ups: f32) -> f32 {
+    max_packets_per_tick * ups
+}
+
+fn max_rolling_packets_per_tick(max_packets_per_second: f32, ups: f32) -> f32 {
+    max_packets_per_second / ups
+}
+
 #[cfg(test)]
 mod tests {
-    use crate::config::server::{max_packets_per_second, max_packets_per_update};
+    use crate::config::server::{max_rolling_packets_per_second, max_rolling_packets_per_tick};
 
     #[test]
-    fn max_packets_per_second_calculation() {
+    fn max_rolling_packets_per_second_calculation() {
         let ups = 20.0;
-        let max_packets_per_update = 2.0;
-        assert_eq!(max_packets_per_second(max_packets_per_update, ups), 40.0);
+        let max_packets_per_tick = 2.0;
+        assert_eq!(
+            max_rolling_packets_per_second(max_packets_per_tick, ups),
+            40.0
+        );
     }
 
     #[test]
-    fn max_packets_per_update_calculation() {
+    fn max_rolling_packets_per_tick_calculation() {
         let ups = 20.0;
         let max_packets_per_second = 50.0;
-        assert_eq!(max_packets_per_update(max_packets_per_second, ups), 2.5);
+        assert_eq!(
+            max_rolling_packets_per_tick(max_packets_per_second, ups),
+            2.5
+        );
     }
 }

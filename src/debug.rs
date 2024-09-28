@@ -39,9 +39,9 @@ pub fn recv_dbg(
         let id = connection_identifier.id;
         let from = connection_identifier.addr;
         println!(
-            "[{}] [{:>016}] [{}] [{}]: {packet:?}",
+            "[{}] [{}] [{}] [{:0>3}]: {packet:?}",
             "recv".truecolor(RED.r, RED.g, RED.b),
-            format!("{:x}", id.0).truecolor(BLUE.r, BLUE.g, BLUE.b),
+            format!("{:0>16x}", id.0).truecolor(BLUE.r, BLUE.g, BLUE.b),
             from.to_string().truecolor(RED.r, RED.g, RED.b),
             index.to_string().truecolor(YELLOW.r, YELLOW.g, YELLOW.b)
         );
@@ -49,9 +49,9 @@ pub fn recv_dbg(
         let id = connection_identifier.id;
         let from = connection_identifier.addr;
         println!(
-            "[{}] [{:>016}] [{}]: {packet:?}",
+            "[{}] [{}] [{}]: {packet:?}",
             "recv".truecolor(RED.r, RED.g, RED.b),
-            format!("{:x}", id.0).truecolor(BLUE.r, BLUE.g, BLUE.b),
+            format!("{:0>16x}", id.0).truecolor(BLUE.r, BLUE.g, BLUE.b),
             from.to_string().truecolor(RED.r, RED.g, RED.b)
         );
     } else {
@@ -64,9 +64,9 @@ pub fn send_dbg(packet: Packet, connection_identifier: Option<ConnectionIdentifi
         let id = connection_identifier.id;
         let to = connection_identifier.addr;
         println!(
-            "[{}] [{:>016}] [{}]: {packet:?}",
+            "[{}] [{}] [{}]: {packet:?}",
             "send".truecolor(GREEN.r, GREEN.g, GREEN.b),
-            format!("{:x}", id.0).truecolor(BLUE.r, BLUE.g, BLUE.b),
+            format!("{:0>16x}", id.0).truecolor(BLUE.r, BLUE.g, BLUE.b),
             to.to_string().truecolor(GREEN.r, GREEN.g, GREEN.b),
         );
     } else {
@@ -103,9 +103,21 @@ pub fn client_disconnect_dbg(connection_identifier: ConnectionIdentifier, index:
 
 #[cfg(test)]
 mod tests {
-    use crate::debug::{client_connect_dbg, client_disconnect_dbg};
-    use crate::packet::UnetId;
+    use crate::debug::{client_connect_dbg, client_disconnect_dbg, recv_dbg};
+    use crate::packet::keep_alive::KeepAlive;
+    use crate::packet::{Packet, UnetId};
     use crate::server::connection::ConnectionIdentifier;
+
+    #[test]
+    fn recv_debug_preview() {
+        let packet = Packet::KeepAlive(KeepAlive::new(UnetId(10)));
+        let connection_identifier = Some(ConnectionIdentifier::new(
+            UnetId(567),
+            "127.0.0.1:0".parse().unwrap(),
+        ));
+        let index = Some(26);
+        recv_dbg(packet, connection_identifier, index);
+    }
 
     #[test]
     fn preview() {
