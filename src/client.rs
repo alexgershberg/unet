@@ -1,4 +1,4 @@
-use crate::debug::{send_dbg, BLUE};
+use crate::debug::{recv_dbg, send_dbg, BLUE};
 use crate::packet::challenge_response::ChallengeResponse;
 use crate::packet::connection_request::ConnectionRequest;
 use crate::packet::disconnect::DisconnectReason;
@@ -30,6 +30,7 @@ pub struct UnetClient {
     pub send_queue: VecDeque<Packet>,
     pub time_since_last_packet_sent: Instant,
     pub time_since_last_packet_received: Instant,
+    pub sequence: u64,
 }
 
 impl UnetClient {
@@ -52,6 +53,7 @@ impl UnetClient {
             send_queue: VecDeque::new(),
             time_since_last_packet_sent: Instant::now(),
             time_since_last_packet_received: Instant::now(),
+            sequence: 0,
         };
 
         connecting_dbg(client_id, target.to_socket_addrs().unwrap().next().unwrap());
@@ -73,15 +75,19 @@ impl UnetClient {
     }
 
     fn internal_send(&mut self, buf: &[u8]) -> io::Result<usize> {
-        let res = self.socket.send(buf);
-        self.time_since_last_packet_sent = Instant::now();
-        res
+        self.socket.send(buf)
     }
 
-    fn send_packet(&mut self, packet: Packet) -> io::Result<usize> {
+    fn send_packet(&mut self, mut packet: Packet) -> io::Result<usize> {
+        packet.set_sequence(self.sequence);
+
         send_dbg(packet, None);
         let bytes = packet.as_bytes();
-        self.internal_send(&bytes)
+        let res = self.internal_send(&bytes);
+        self.time_since_last_packet_sent = Instant::now();
+        self.sequence += 1;
+
+        res
     }
 
     fn send_packets(&mut self) {
@@ -149,7 +155,7 @@ impl UnetClient {
     }
 
     fn handle_packet(&mut self, packet: Packet) {
-        // recv_dbg(packet, None);
+        recv_dbg(packet, None, None);
         self.reset_timeout();
         match packet {
             Packet::ChallengeRequest => {

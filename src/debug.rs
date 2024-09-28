@@ -1,7 +1,7 @@
-use crate::packet::{Packet, UnetId};
-use crate::server::ConnectionIdentifier;
+use crate::packet::Packet;
+use crate::server::connection::ConnectionIdentifier;
 use colored::Colorize;
-use std::net::{SocketAddr, ToSocketAddrs};
+use std::net::ToSocketAddrs;
 
 pub struct Color {
     pub r: u8,
@@ -24,8 +24,28 @@ pub const BLUE: Color = Color {
     b: 255,
 };
 
-pub fn recv_dbg(packet: Packet, connection_identifier: Option<ConnectionIdentifier>) {
-    if let Some(connection_identifier) = connection_identifier {
+pub const YELLOW: Color = Color {
+    r: 255,
+    g: 215,
+    b: 0,
+};
+
+pub fn recv_dbg(
+    packet: Packet,
+    connection_identifier: Option<ConnectionIdentifier>,
+    index: Option<usize>,
+) {
+    if let (Some(connection_identifier), Some(index)) = (connection_identifier, index) {
+        let id = connection_identifier.id;
+        let from = connection_identifier.addr;
+        println!(
+            "[{}] [{:>016}] [{}] [{}]: {packet:?}",
+            "recv".truecolor(RED.r, RED.g, RED.b),
+            format!("{:x}", id.0).truecolor(BLUE.r, BLUE.g, BLUE.b),
+            from.to_string().truecolor(RED.r, RED.g, RED.b),
+            index.to_string().truecolor(YELLOW.r, YELLOW.g, YELLOW.b)
+        );
+    } else if let Some(connection_identifier) = connection_identifier {
         let id = connection_identifier.id;
         let from = connection_identifier.addr;
         println!(
@@ -85,7 +105,7 @@ pub fn client_disconnect_dbg(connection_identifier: ConnectionIdentifier, index:
 mod tests {
     use crate::debug::{client_connect_dbg, client_disconnect_dbg};
     use crate::packet::UnetId;
-    use crate::server::ConnectionIdentifier;
+    use crate::server::connection::ConnectionIdentifier;
 
     #[test]
     fn preview() {

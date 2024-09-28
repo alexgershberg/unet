@@ -18,7 +18,7 @@ fn main() {
             }
 
             client.update();
-            sleep(Duration::from_millis(20));
+            sleep(Duration::from_millis(250));
         }
     });
 

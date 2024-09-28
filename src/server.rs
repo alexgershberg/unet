@@ -1,73 +1,35 @@
-use crate::config::Config;
-use crate::debug::{client_connect_dbg, client_disconnect_dbg, recv_dbg, send_dbg, BLUE};
+pub mod connection;
+
+use crate::config::server::ServerConfig;
+use crate::debug::{client_connect_dbg, client_disconnect_dbg, recv_dbg, send_dbg, YELLOW};
 use crate::packet::disconnect::{Disconnect, DisconnectReason};
 use crate::packet::keep_alive::KeepAlive;
-use crate::packet::{Packet, UnetId};
-use crate::{BUF_SIZE, CLIENT_CONNECTION_TIMEOUT, KEEP_ALIVE_FREQUENCY, MAX_CONNECTIONS};
+use crate::packet::Packet;
+use crate::server::connection::{Connection, ConnectionIdentifier};
+use crate::{BUF_SIZE, MAX_CONNECTIONS};
 use colored::Colorize;
 use std::collections::VecDeque;
 use std::io;
-use std::net::{SocketAddr, ToSocketAddrs, UdpSocket};
+use std::net::{SocketAddr, UdpSocket};
 use std::thread::sleep;
 use std::time::{Duration, Instant};
-
-#[derive(Copy, Clone, Debug)]
-pub struct ConnectionIdentifier {
-    pub id: UnetId,
-    pub addr: SocketAddr,
-}
-impl ConnectionIdentifier {
-    pub fn new(id: UnetId, addr: SocketAddr) -> Self {
-        Self { id, addr }
-    }
-}
-
-#[derive(Copy, Clone, Debug)]
-pub struct Connection {
-    pub connection_identifier: ConnectionIdentifier,
-    pub time_since_last_packet_sent: Instant,
-    pub time_since_last_packet_received: Instant,
-    pub packets_per_update_received: u32, // From Connection
-}
-
-impl Connection {
-    fn still_alive(&mut self) {
-        self.time_since_last_packet_sent = Instant::now();
-    }
-
-    fn should_send_keep_alive(&self) -> bool {
-        self.time_since_last_packet_sent.elapsed() > KEEP_ALIVE_FREQUENCY
-    }
-
-    fn reset_timeout(&mut self) {
-        self.time_since_last_packet_received = Instant::now();
-    }
-
-    fn timed_out(&self) -> bool {
-        self.time_since_last_packet_received.elapsed() > CLIENT_CONNECTION_TIMEOUT
-    }
-
-    fn is_spamming(&self, max_packets_per_update: f32) -> bool {
-        self.packets_per_update_received as f32 >= max_packets_per_update
-    }
-}
 
 #[derive(Debug)]
 pub struct UnetServer {
     socket: UdpSocket,
     pub connections: Vec<Option<Connection>>,
     receive_buffer: VecDeque<(Packet, SocketAddr)>,
-    config: Config,
+    config: ServerConfig,
     previous: Instant,
     lag: u128,
 }
 
 impl UnetServer {
     pub fn new() -> io::Result<Self> {
-        Self::from_config(Config::default())
+        Self::from_config(ServerConfig::default())
     }
 
-    pub fn from_config(config: Config) -> io::Result<Self> {
+    pub fn from_config(config: ServerConfig) -> io::Result<Self> {
         let socket = UdpSocket::bind(config.addr)?;
         socket.set_nonblocking(true)?;
         let connections = vec![None; MAX_CONNECTIONS];
@@ -81,7 +43,7 @@ impl UnetServer {
             lag: 0,
         };
 
-        starting_server_dbg(&server);
+        server_starting_dbg(&server);
 
         Ok(server)
     }
@@ -124,7 +86,9 @@ impl UnetServer {
     }
 
     fn send_packet_to(&mut self, packet: Packet, to: ConnectionIdentifier) -> io::Result<usize> {
-        // send_dbg(packet, Some(to));
+        if self.config.send_debug {
+            send_dbg(packet, Some(to));
+        }
 
         let bytes = packet.as_bytes();
         self.send_to(&bytes, to)
@@ -170,11 +134,22 @@ impl UnetServer {
     fn handle_packet(&mut self, packet: Packet, from: SocketAddr) {
         let header = packet.header();
         let connection_identifier = ConnectionIdentifier::new(header.client_id, from);
-        // recv_dbg(packet, Some(connection_identifier));
+
+        let recv_debug = self.config.recv_debug;
 
         if let Some(connection) = self.get_connection(connection_identifier) {
+            if recv_debug {
+                recv_dbg(packet, Some(connection_identifier), Some(connection.index));
+            }
+
+            if connection.is_packet_out_of_order(packet) {
+                return;
+            }
             connection.reset_timeout();
             connection.packets_per_update_received += 1;
+            connection.packet_sequence += 1;
+        } else if recv_debug {
+            recv_dbg(packet, Some(connection_identifier), None);
         }
 
         match packet {
@@ -218,6 +193,8 @@ impl UnetServer {
             time_since_last_packet_sent: Instant::now(),
             time_since_last_packet_received: Instant::now(),
             packets_per_update_received: 0,
+            packet_sequence: 0,
+            index,
         });
 
         self.send_challenge_packet(connection_identifier);
@@ -328,19 +305,43 @@ impl UnetServer {
 
     fn print_state(&self) {
         for connection in self.connections.iter().flatten() {
-            println!(
-                "[{:x}]: {}",
-                connection.connection_identifier.id.0, connection.packets_per_update_received
-            )
+            connection_state_dbg(connection);
         }
     }
 }
 
-pub fn starting_server_dbg(server: &UnetServer) {
+pub fn server_starting_dbg(server: &UnetServer) {
     println!(
         "Starting server on {}",
-        server.config.addr.to_string().truecolor(255, 215, 0),
+        server
+            .config
+            .addr
+            .to_string()
+            .truecolor(YELLOW.r, YELLOW.g, YELLOW.b),
     );
 
     dbg!(server.config);
+}
+
+pub fn connection_state_dbg(connection: &Connection) {
+    println!(
+        r#"{:>16x}:    time_since_last_packet_received:   {:.2?}
+                     time_since_last_packet_send:       {:.2?}
+                "#,
+        connection.connection_identifier.id.0,
+        connection.time_since_last_packet_received.elapsed(),
+        connection.time_since_last_packet_sent.elapsed()
+    );
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::server::connection::Connection;
+    use crate::server::connection_state_dbg;
+
+    #[test]
+    fn preview() {
+        let connection = Connection::default();
+        connection_state_dbg(&connection);
+    }
 }

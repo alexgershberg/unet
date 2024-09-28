@@ -126,6 +126,22 @@ impl Packet {
             Packet::Unimplemented => todo!(),
         }
     }
+
+    pub fn set_sequence(&mut self, sequence: u64) {
+        match self {
+            Packet::ConnectionRequest(mut connection_request) => {
+                connection_request.header.sequence = sequence
+            }
+            Packet::ChallengeRequest => {}
+            Packet::ChallengeResponse(challenge_response) => {
+                challenge_response.header.sequence = sequence
+            }
+            Packet::KeepAlive(keep_alive) => keep_alive.header.sequence = sequence,
+            Packet::Data(data) => data.header.sequence = sequence,
+            Packet::Disconnect(disconnect) => disconnect.header.sequence = sequence,
+            Packet::Unimplemented => {}
+        }
+    }
 }
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
@@ -133,15 +149,17 @@ impl Packet {
 pub struct Header {
     pub protocol_version: [u8; 5],
     pub client_id: UnetId,
+    pub sequence: u64,
 }
 
 impl Header {
-    const SIZE: usize = size_of::<[u8; 5]>() + size_of::<UnetId>();
+    const SIZE: usize = size_of::<[u8; 5]>() + size_of::<UnetId>() + size_of::<u64>();
 
     pub fn new(client_id: UnetId) -> Self {
         Self {
             protocol_version: *b"UNET1",
             client_id,
+            sequence: 0,
         }
     }
 
@@ -152,17 +170,50 @@ impl Header {
         let client_id = UnetId(u64::from_be_bytes([
             bytes[5], bytes[6], bytes[7], bytes[8], bytes[9], bytes[10], bytes[11], bytes[12],
         ]));
+        let sequence = u64::from_be_bytes([
+            bytes[13], bytes[14], bytes[15], bytes[16], bytes[17], bytes[18], bytes[19], bytes[20],
+        ]);
 
         Self {
             protocol_version,
             client_id,
+            sequence,
         }
     }
 
     pub fn as_bytes(&self) -> Vec<u8> {
         let mut output = vec![];
-        output.append(&mut self.protocol_version.to_vec().clone());
-        output.append(&mut self.client_id.0.to_be_bytes().to_vec().clone());
+        output.extend_from_slice(&self.protocol_version);
+        output.extend_from_slice(&self.client_id.0.to_be_bytes());
+        output.extend_from_slice(&self.sequence.to_be_bytes());
+        assert_eq!(output.len(), Header::SIZE);
         output
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::packet::{Header, UnetId};
+
+    #[test]
+    fn from_bytes() {
+        let bytes = vec![
+            85, 78, 69, 84, 49, 0, 0, 0, 0, 0, 0, 3, 231, 0, 0, 0, 0, 0, 0, 0, 123,
+        ];
+        let header = Header::from_bytes(&bytes);
+        assert_eq!(header.protocol_version, *b"UNET1");
+        assert_eq!(header.client_id, UnetId(999));
+        assert_eq!(header.sequence, 123);
+    }
+
+    #[test]
+    fn as_bytes() {
+        let mut header = Header::new(UnetId(999));
+        header.sequence = 123;
+        let bytes = header.as_bytes();
+        assert_eq!(
+            bytes,
+            vec![85, 78, 69, 84, 49, 0, 0, 0, 0, 0, 0, 3, 231, 0, 0, 0, 0, 0, 0, 0, 123]
+        )
     }
 }
