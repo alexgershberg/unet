@@ -13,7 +13,7 @@ impl ChallengeResponse {
     }
 
     pub fn from_bytes(bytes: &[u8]) -> Self {
-        let header = Header::from_bytes(&bytes);
+        let header = Header::from_bytes(bytes);
         Self { header }
     }
 

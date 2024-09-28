@@ -29,7 +29,7 @@ pub fn recv_dbg(packet: Packet, connection_identifier: Option<ConnectionIdentifi
         let id = connection_identifier.id;
         let from = connection_identifier.addr;
         println!(
-            "[{}] [{:016}] [{}]: {packet:?}",
+            "[{}] [{:>016}] [{}]: {packet:?}",
             "recv".truecolor(RED.r, RED.g, RED.b),
             format!("{:x}", id.0).truecolor(BLUE.r, BLUE.g, BLUE.b),
             from.to_string().truecolor(RED.r, RED.g, RED.b)
@@ -44,7 +44,7 @@ pub fn send_dbg(packet: Packet, connection_identifier: Option<ConnectionIdentifi
         let id = connection_identifier.id;
         let to = connection_identifier.addr;
         println!(
-            "[{}] [{}] [{}]: {packet:?}",
+            "[{}] [{:>016}] [{}]: {packet:?}",
             "send".truecolor(GREEN.r, GREEN.g, GREEN.b),
             format!("{:x}", id.0).truecolor(BLUE.r, BLUE.g, BLUE.b),
             to.to_string().truecolor(GREEN.r, GREEN.g, GREEN.b),

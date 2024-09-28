@@ -1,4 +1,3 @@
-use std::fmt::{Display, Formatter};
 use crate::packet::{Header, UnetId};
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
@@ -6,6 +5,7 @@ use crate::packet::{Header, UnetId};
 pub enum DisconnectReason {
     Timeout = 0,
     ServerFull = 1,
+    Spam = 2,
 }
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
@@ -19,6 +19,7 @@ impl DisconnectReason {
         match byte {
             0 => Self::Timeout,
             1 => Self::ServerFull,
+            2 => Self::Spam,
             _ => panic!("Badly formed DisconnectReason value: {byte}"),
         }
     }

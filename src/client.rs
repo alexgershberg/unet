@@ -1,3 +1,4 @@
+use crate::debug::{send_dbg, BLUE};
 use crate::packet::challenge_response::ChallengeResponse;
 use crate::packet::connection_request::ConnectionRequest;
 use crate::packet::disconnect::DisconnectReason;
@@ -10,7 +11,6 @@ use std::io;
 use std::net::{SocketAddr, ToSocketAddrs, UdpSocket};
 use std::process::exit;
 use std::time::Instant;
-use crate::debug::BLUE;
 
 #[derive(Copy, Clone, Debug, PartialEq)]
 pub enum ClientState {
@@ -27,7 +27,7 @@ pub struct UnetClient {
     pub server_index: Option<usize>,
     socket: UdpSocket,
     state: ClientState,
-    send_queue: VecDeque<Packet>,
+    pub send_queue: VecDeque<Packet>,
     pub time_since_last_packet_sent: Instant,
     pub time_since_last_packet_received: Instant,
 }
@@ -79,7 +79,7 @@ impl UnetClient {
     }
 
     fn send_packet(&mut self, packet: Packet) -> io::Result<usize> {
-        // send_dbg(packet, None);
+        send_dbg(packet, None);
         let bytes = packet.as_bytes();
         self.internal_send(&bytes)
     }
@@ -108,12 +108,17 @@ impl UnetClient {
             ClientState::Disconnected(reason) => {
                 match reason {
                     DisconnectReason::Timeout => {
-                        disconnect_dbg(self.id,self.target, "Client timed out".to_string());
-                        // println!("[{}]", "Client timed out".truecolor(255, 0, 255));
+                        disconnect_dbg(self.id, self.target, "Client timed out".to_string());
                     }
                     DisconnectReason::ServerFull => {
-                        disconnect_dbg(self.id,self.target, "Server was full".to_string());
-                        // println!("[{}]", "Server was full".truecolor(255, 0, 255));
+                        disconnect_dbg(self.id, self.target, "Server was full".to_string());
+                    }
+                    DisconnectReason::Spam => {
+                        disconnect_dbg(
+                            self.id,
+                            self.target,
+                            "Kicked for spamming the server".to_string(),
+                        );
                     }
                 }
                 exit(0)

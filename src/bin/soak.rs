@@ -1,10 +1,10 @@
-use std::time::Duration;
 use futures::future::TryJoinAll;
+use std::time::Duration;
 use tokio::time::sleep;
 use unet::client::UnetClient;
-use unet::MAX_CONNECTIONS;
 use unet::packet::data::Data;
 use unet::packet::{Packet, UnetId};
+use unet::MAX_CONNECTIONS;
 
 #[tokio::main(flavor = "multi_thread")]
 async fn main() {
@@ -23,5 +23,9 @@ async fn main() {
         handles.push(handle);
     }
 
-    handles.into_iter().collect::<TryJoinAll<_>>().await.unwrap();
+    handles
+        .into_iter()
+        .collect::<TryJoinAll<_>>()
+        .await
+        .unwrap();
 }
