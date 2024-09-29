@@ -1,8 +1,7 @@
-use crate::config::server::ServerConfig;
 use crate::packet::{Packet, UnetId};
 use crate::rolling_average::RollingAverage;
 use crate::tick::Tick;
-use crate::DEFAULT_KEEP_ALIVE_FREQUENCY;
+use crate::{DEFAULT_CLIENT_CONNECTION_TIMEOUT, DEFAULT_KEEP_ALIVE_FREQUENCY};
 use std::net::SocketAddr;
 
 #[derive(Copy, Clone, Debug)]
@@ -25,7 +24,7 @@ pub struct Connection {
     pub packets_per_tick_received: f32, // Packets received from Connection
     pub packet_sequence: u64,
     pub index: usize,
-    pub config: ServerConfig, // TODO: Only needed for Client Connection Timeout, maybe can simplify?
+    pub client_connection_timeout: Tick,
 }
 
 impl Connection {
@@ -38,7 +37,7 @@ impl Connection {
             packets_per_tick_received: 0.0,
             packet_sequence: 0,
             index: 0,
-            config: ServerConfig::default(),
+            client_connection_timeout: DEFAULT_CLIENT_CONNECTION_TIMEOUT
         }
     }
     pub fn still_alive(&mut self) {
@@ -54,7 +53,7 @@ impl Connection {
     }
 
     pub fn timed_out(&self) -> bool {
-        self.ticks_since_last_packet_received >= self.config.client_connection_timeout
+        self.ticks_since_last_packet_received >= self.client_connection_timeout
     }
 
     pub fn is_spamming(&self, max_packets_per_tick: f32) -> bool {

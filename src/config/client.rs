@@ -5,9 +5,11 @@ use crate::{
     DEFAULT_TPS,
 };
 use std::net::SocketAddr;
+use crate::virtual_network::VirtualNetwork;
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Debug)]
 pub struct ClientConfig {
+    pub virtual_network: Option<VirtualNetwork>,
     pub id: Option<UnetId>,
     pub target: SocketAddr,
     pub server_not_responding_timeout: Option<Tick>,
@@ -30,6 +32,7 @@ impl ClientConfig {
         let send_debug = false;
 
         Self {
+            virtual_network: None,
             id: None,
             target,
             server_not_responding_timeout,

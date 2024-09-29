@@ -10,6 +10,7 @@ pub mod rolling_average;
 pub mod server;
 pub mod tick;
 pub mod token;
+pub mod virtual_network;
 
 pub const DEFAULT_SERVER_ADDR: SocketAddr =
     SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::new(127, 0, 0, 1), 10010));

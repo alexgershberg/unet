@@ -3,9 +3,11 @@ use crate::{
     DEFAULT_TPS,
 };
 use std::net::SocketAddr;
+use crate::virtual_network::VirtualNetwork;
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Debug)]
 pub struct ServerConfig {
+    pub virtual_network: Option<VirtualNetwork>,
     pub addr: SocketAddr,
     pub client_connection_timeout: Tick,
     pub keep_alive_frequency: Tick,
@@ -30,10 +32,11 @@ impl ServerConfig {
             tps,
         ));
 
-        let recv_debug = true;
-        let send_debug = true;
+        let recv_debug = false;
+        let send_debug = false;
 
         Self {
+            virtual_network: None,
             addr,
             client_connection_timeout,
             keep_alive_frequency,

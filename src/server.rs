@@ -12,8 +12,10 @@ use colored::Colorize;
 use std::collections::VecDeque;
 use std::io;
 use std::net::{SocketAddr, UdpSocket};
+use std::sync::mpsc::TryRecvError;
 use std::thread::sleep;
 use std::time::{Duration, Instant};
+use crate::virtual_network::VirtualNetwork;
 
 #[derive(Debug)]
 pub struct UnetServer {
@@ -87,7 +89,12 @@ impl UnetServer {
             connection.still_alive();
         }
 
-        self.socket.send_to(buf, to)
+        if let Some(virtual_network) = &self.config.virtual_network {
+            virtual_network.tx.send(buf.to_vec()).unwrap();
+            Ok(buf.len())
+        } else {
+            self.socket.send_to(buf, to)
+        }
     }
 
     fn send_packet_to(&mut self, packet: Packet, to: ConnectionIdentifier) -> io::Result<usize> {
@@ -107,13 +114,28 @@ impl UnetServer {
         }
     }
 
-    fn receive(&self, buf: &mut [u8]) -> Option<(usize, SocketAddr)> {
-        let (n, from) = match self.socket.recv_from(buf) {
-            Ok((n, from)) => (n, from),
-            Err(e) => return None,
-        };
+    fn receive(&self, mut buf: &mut [u8]) -> Option<(usize, SocketAddr)> {
+        if let Some(virtual_network) = &self.config.virtual_network {
+            let output = virtual_network.rx.try_recv().unwrap_or_else(|e| match e {
+                TryRecvError::Empty => {vec![]}
+                TryRecvError::Disconnected => {unreachable!()}
+            });
 
-        Some((n, from))
+            if output.is_empty() {
+                return None;
+            }
+
+            buf = &mut buf[..output.len()];
+            buf.clone_from_slice(&output);
+
+            Some((output.len(), "0.0.0.0:0".parse().unwrap()))
+        } else {
+            let (n, from) = match self.socket.recv_from(buf) {
+                Ok((n, from)) => (n, from),
+                Err(e) => return None,
+            };
+            Some((n, from))
+        }
     }
 
     fn receive_packet(&self) -> Option<(Packet, SocketAddr)> {
@@ -194,7 +216,7 @@ impl UnetServer {
         };
 
         let mut connection = Connection::new(connection_identifier);
-        connection.config = self.config;
+        connection.client_connection_timeout = self.config.client_connection_timeout;
         connection.index = index;
         self.connections[index] = Some(connection);
 
@@ -332,8 +354,6 @@ pub fn server_starting_dbg(server: &UnetServer) {
             .to_string()
             .truecolor(YELLOW.r, YELLOW.g, YELLOW.b),
     );
-
-    dbg!(server.config);
 }
 
 pub fn connection_state_dbg(connection: &Connection) {

@@ -12,8 +12,10 @@ use std::collections::VecDeque;
 use std::io;
 use std::net::{SocketAddr, ToSocketAddrs, UdpSocket};
 use std::process::exit;
+use std::sync::mpsc::TryRecvError;
 use std::thread::sleep;
 use std::time::{Duration, Instant};
+use crate::virtual_network::VirtualNetwork;
 
 #[derive(Copy, Clone, Debug, PartialEq)]
 pub enum ClientState {
@@ -99,7 +101,7 @@ impl UnetClient {
 
         if !self.check_server_response_ok() {
             disconnect_dbg(self.id, self.target, "Server not responding".to_string());
-            exit(0);
+            self.exit();
         }
 
         self.ticks_since_last_packet_sent.value += 1.0;
@@ -111,7 +113,12 @@ impl UnetClient {
     }
 
     fn internal_send(&mut self, buf: &[u8]) -> io::Result<usize> {
-        self.socket.send(buf)
+        if let Some(virtual_network) = &self.config.virtual_network {
+            virtual_network.tx.send(buf.to_vec()).unwrap();
+            Ok(buf.len())
+        } else {
+            self.socket.send(buf)
+        }
     }
 
     fn send_packet(&mut self, mut packet: Packet) -> io::Result<usize> {
@@ -163,7 +170,7 @@ impl UnetClient {
                         );
                     }
                 }
-                exit(0)
+                self.exit()
             }
         }
     }
@@ -180,13 +187,30 @@ impl UnetClient {
         self.send_packet(Packet::KeepAlive(KeepAlive::new(self.id)))
     }
 
-    fn receive(&self, buf: &mut [u8]) -> Option<usize> {
-        let (n, from) = match self.socket.recv_from(buf) {
-            Ok((n, from)) => (n, from),
-            Err(e) => return None,
-        };
+    fn receive(&self, mut buf: &mut [u8]) -> Option<usize> {
+        if let Some(virtual_network) = &self.config.virtual_network {
+            let output = virtual_network.rx.try_recv().unwrap_or_else(|e| match e {
+                TryRecvError::Empty => { 
+                    vec![]
+                }
+                TryRecvError::Disconnected => { unreachable!() }
+            });
 
-        Some(n)
+            if output.is_empty() {
+                return None;    
+            }
+
+            buf = &mut buf[..output.len()];
+            buf.clone_from_slice(&output);
+
+            Some(output.len())
+        } else {
+            let (n, from) = match self.socket.recv_from(buf) {
+                Ok((n, from)) => (n, from),
+                Err(e) => return None,
+            };
+            Some(n)
+        }
     }
 
     fn receive_packet(&self) -> Option<Packet> {
@@ -247,6 +271,10 @@ impl UnetClient {
 
     fn should_send_keep_alive(&self) -> bool {
         self.ticks_since_last_packet_sent >= DEFAULT_KEEP_ALIVE_FREQUENCY
+    }
+    
+    fn exit(&mut self) {
+        println!("SHOULD TERMINATE NOW")
     }
 
     fn print_state(&self) {}
