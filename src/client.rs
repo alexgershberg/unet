@@ -15,7 +15,8 @@ use std::process::exit;
 use std::sync::mpsc::TryRecvError;
 use std::thread::sleep;
 use std::time::{Duration, Instant};
-use crate::virtual_network::VirtualNetwork;
+use crate::virtual_network::Network::{Real, Virtual};
+use crate::virtual_network::{Network, VirtualNetwork};
 
 #[derive(Copy, Clone, Debug, PartialEq)]
 pub enum ClientState {
@@ -30,7 +31,7 @@ pub struct UnetClient {
     pub id: UnetId,
     target: SocketAddr,
     pub server_index: Option<usize>,
-    socket: UdpSocket,
+    network: Network,
     pub state: ClientState,
     pub send_queue: VecDeque<Packet>,
     pub config: ClientConfig,
@@ -46,12 +47,17 @@ impl UnetClient {
         Self::from_config(ClientConfig::new())
     }
 
-    pub fn from_config(config: ClientConfig) -> io::Result<Self> {
+    pub fn from_config(mut config: ClientConfig) -> io::Result<Self> {
         let target = config.target;
 
-        let socket = UdpSocket::bind("0.0.0.0:0")?;
-        socket.set_nonblocking(true)?;
-        socket.connect(target)?;
+        let network = if let Some(virtual_network) = config.virtual_network.take() {
+            Virtual(virtual_network)
+        } else {
+            let socket = UdpSocket::bind("0.0.0.0:0")?;
+            socket.set_nonblocking(true)?;
+            socket.connect(target)?;
+            Real(socket)
+        };
 
         let mut client_id = UnetId::new();
         if let Some(id) = config.id {
@@ -62,7 +68,7 @@ impl UnetClient {
             id: client_id,
             target: target.to_socket_addrs().unwrap().next().unwrap(),
             server_index: None,
-            socket,
+            network,
             state: ClientState::SendingConnectionRequest,
             send_queue: VecDeque::new(),
             config,
@@ -113,12 +119,7 @@ impl UnetClient {
     }
 
     fn internal_send(&mut self, buf: &[u8]) -> io::Result<usize> {
-        if let Some(virtual_network) = &self.config.virtual_network {
-            virtual_network.tx.send(buf.to_vec()).unwrap();
-            Ok(buf.len())
-        } else {
-            self.socket.send(buf)
-        }
+        self.network.send(buf)
     }
 
     fn send_packet(&mut self, mut packet: Packet) -> io::Result<usize> {
@@ -187,30 +188,9 @@ impl UnetClient {
         self.send_packet(Packet::KeepAlive(KeepAlive::new(self.id)))
     }
 
-    fn receive(&self, mut buf: &mut [u8]) -> Option<usize> {
-        if let Some(virtual_network) = &self.config.virtual_network {
-            let output = virtual_network.rx.try_recv().unwrap_or_else(|e| match e {
-                TryRecvError::Empty => { 
-                    vec![]
-                }
-                TryRecvError::Disconnected => { unreachable!() }
-            });
-
-            if output.is_empty() {
-                return None;    
-            }
-
-            buf = &mut buf[..output.len()];
-            buf.clone_from_slice(&output);
-
-            Some(output.len())
-        } else {
-            let (n, from) = match self.socket.recv_from(buf) {
-                Ok((n, from)) => (n, from),
-                Err(e) => return None,
-            };
-            Some(n)
-        }
+    fn receive(&self, buf: &mut [u8]) -> Option<usize> {
+        let (n, _from) = self.network.recv_from(buf)?;
+        Some(n)
     }
 
     fn receive_packet(&self) -> Option<Packet> {

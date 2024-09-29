@@ -12,14 +12,14 @@ use colored::Colorize;
 use std::collections::VecDeque;
 use std::io;
 use std::net::{SocketAddr, UdpSocket};
-use std::sync::mpsc::TryRecvError;
 use std::thread::sleep;
 use std::time::{Duration, Instant};
-use crate::virtual_network::VirtualNetwork;
+use crate::virtual_network::{Network};
+use crate::virtual_network::Network::{Real, Virtual};
 
 #[derive(Debug)]
 pub struct UnetServer {
-    socket: UdpSocket,
+    network: Network,
     pub connections: Vec<Option<Connection>>,
     receive_buffer: VecDeque<(Packet, SocketAddr)>,
     config: ServerConfig,
@@ -29,13 +29,19 @@ pub struct UnetServer {
 }
 
 impl UnetServer {
-    pub fn from_config(config: ServerConfig) -> io::Result<Self> {
-        let socket = UdpSocket::bind(config.addr)?;
-        socket.set_nonblocking(true)?;
+    pub fn from_config(mut config: ServerConfig) -> io::Result<Self> {
+        let network = if let Some(virtual_network) = config.virtual_network.take() {
+            Virtual(virtual_network)
+        } else {
+            let socket = UdpSocket::bind(config.addr)?;
+            socket.set_nonblocking(true)?;
+            Real(socket)
+        };
+        
         let connections = vec![None; MAX_CONNECTIONS];
 
         let server = Self {
-            socket,
+            network,
             connections,
             receive_buffer: VecDeque::new(),
             config,
@@ -89,12 +95,7 @@ impl UnetServer {
             connection.still_alive();
         }
 
-        if let Some(virtual_network) = &self.config.virtual_network {
-            virtual_network.tx.send(buf.to_vec()).unwrap();
-            Ok(buf.len())
-        } else {
-            self.socket.send_to(buf, to)
-        }
+        self.network.send_to(buf, to)
     }
 
     fn send_packet_to(&mut self, packet: Packet, to: ConnectionIdentifier) -> io::Result<usize> {
@@ -114,28 +115,8 @@ impl UnetServer {
         }
     }
 
-    fn receive(&self, mut buf: &mut [u8]) -> Option<(usize, SocketAddr)> {
-        if let Some(virtual_network) = &self.config.virtual_network {
-            let output = virtual_network.rx.try_recv().unwrap_or_else(|e| match e {
-                TryRecvError::Empty => {vec![]}
-                TryRecvError::Disconnected => {unreachable!()}
-            });
-
-            if output.is_empty() {
-                return None;
-            }
-
-            buf = &mut buf[..output.len()];
-            buf.clone_from_slice(&output);
-
-            Some((output.len(), "0.0.0.0:0".parse().unwrap()))
-        } else {
-            let (n, from) = match self.socket.recv_from(buf) {
-                Ok((n, from)) => (n, from),
-                Err(e) => return None,
-            };
-            Some((n, from))
-        }
+    fn receive(&self, buf: &mut [u8]) -> Option<(usize, SocketAddr)> {
+        self.network.recv_from(buf)
     }
 
     fn receive_packet(&self) -> Option<(Packet, SocketAddr)> {
