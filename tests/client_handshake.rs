@@ -13,7 +13,6 @@ fn client_handshake() {
     let mut server = UnetServer::from_config(server_config).unwrap();
     let mut client = UnetClient::from_config(client_config).unwrap();
 
-
     assert_eq!(client.state, ClientState::SendingConnectionRequest);
 
     println!("client::tick 1");

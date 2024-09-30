@@ -37,7 +37,7 @@ impl Connection {
             packets_per_tick_received: 0.0,
             packet_sequence: 0,
             index: 0,
-            client_connection_timeout: DEFAULT_CLIENT_CONNECTION_TIMEOUT
+            client_connection_timeout: DEFAULT_CLIENT_CONNECTION_TIMEOUT,
         }
     }
     pub fn still_alive(&mut self) {

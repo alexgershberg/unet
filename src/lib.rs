@@ -5,12 +5,12 @@ use std::time::Duration;
 pub mod client;
 pub mod config;
 pub mod debug;
+pub mod network;
 pub mod packet;
 pub mod rolling_average;
 pub mod server;
 pub mod tick;
 pub mod token;
-pub mod virtual_network;
 
 pub const DEFAULT_SERVER_ADDR: SocketAddr =
     SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::new(127, 0, 0, 1), 10010));

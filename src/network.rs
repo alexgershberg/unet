@@ -5,34 +5,29 @@ use std::sync::mpsc::{Receiver, Sender, TryRecvError};
 #[derive(Debug)]
 pub struct VirtualNetwork {
     pub tx: Sender<Vec<u8>>,
-    pub rx: Receiver<Vec<u8>>
+    pub rx: Receiver<Vec<u8>>,
 }
-
 
 #[derive(Debug)]
 pub enum Network {
     Real(UdpSocket),
-    Virtual(VirtualNetwork)
+    Virtual(VirtualNetwork),
 }
 
 impl Network {
     pub fn send_to(&self, buf: &[u8], to: SocketAddr) -> io::Result<usize> {
         match self {
-            Network::Real(socket) => {
-                socket.send_to(buf, to)
-            }
+            Network::Real(socket) => socket.send_to(buf, to),
             Network::Virtual(virtual_network) => {
                 virtual_network.tx.send(buf.to_vec()).unwrap();
                 Ok(buf.len())
             }
         }
     }
-    
-    pub fn send(&self, buf: &[u8]) -> io::Result<usize>  {
+
+    pub fn send(&self, buf: &[u8]) -> io::Result<usize> {
         match self {
-            Network::Real(socket) => {
-                socket.send(buf)
-            }
+            Network::Real(socket) => socket.send(buf),
             Network::Virtual(virtual_network) => {
                 virtual_network.tx.send(buf.to_vec()).unwrap();
                 Ok(buf.len())
@@ -51,8 +46,12 @@ impl Network {
             }
             Network::Virtual(virtual_network) => {
                 let output = &virtual_network.rx.try_recv().unwrap_or_else(|e| match e {
-                    TryRecvError::Empty => {vec![]}
-                    TryRecvError::Disconnected => {unreachable!()}
+                    TryRecvError::Empty => {
+                        vec![]
+                    }
+                    TryRecvError::Disconnected => {
+                        unreachable!()
+                    }
                 });
 
                 if output.is_empty() {
@@ -60,7 +59,7 @@ impl Network {
                 }
 
                 buf = &mut buf[..output.len()];
-                buf.clone_from_slice(&output);
+                buf.clone_from_slice(output);
 
                 Some((output.len(), "0.0.0.0:0".parse().unwrap()))
             }

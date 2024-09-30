@@ -13,10 +13,9 @@ async fn main() {
         let handle = tokio::spawn(async move {
             let mut client = UnetClient::new().unwrap();
             let mut count = 0;
-            loop {
-                sleep(Duration::from_secs(1)).await; // Without this Tokio only spawns ~7 clients, no idea why.
+            sleep(Duration::from_secs(1)).await; // Without this Tokio only spawns ~7 clients, no idea why.
+            while client.update() {
                 client.send(Packet::Data(Data::new(client.id, count)));
-                client.update();
                 count += 1;
             }
         });

@@ -11,14 +11,16 @@ use unet::packet::Packet;
 fn main() {
     let (rx, tx) = channel();
     let j1 = thread::spawn(move || {
-        let mut client = UnetClient::from_config(ClientConfig::default()).unwrap();
+        let mut config = ClientConfig::default();
+        config.recv_debug = true;
+        config.send_debug = true;
 
-        loop {
+        let mut client = UnetClient::from_config(config).unwrap();
+
+        while client.update() {
             while let Ok(val) = tx.try_recv() {
                 client.send(Packet::Data(Data::new(client.id, val)))
             }
-
-            client.update();
         }
     });
 

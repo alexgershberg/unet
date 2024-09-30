@@ -1,5 +1,7 @@
 use crate::config::client::ClientConfig;
 use crate::debug::{recv_dbg, send_dbg, BLUE};
+use crate::network::Network::{Real, Virtual};
+use crate::network::{Network, VirtualNetwork};
 use crate::packet::challenge_response::ChallengeResponse;
 use crate::packet::connection_request::ConnectionRequest;
 use crate::packet::disconnect::DisconnectReason;
@@ -15,8 +17,6 @@ use std::process::exit;
 use std::sync::mpsc::TryRecvError;
 use std::thread::sleep;
 use std::time::{Duration, Instant};
-use crate::virtual_network::Network::{Real, Virtual};
-use crate::virtual_network::{Network, VirtualNetwork};
 
 #[derive(Copy, Clone, Debug, PartialEq)]
 pub enum ClientState {
@@ -40,6 +40,7 @@ pub struct UnetClient {
     pub sequence: u64,
     previous: Instant,
     lag: u128,
+    terminate: bool,
 }
 
 impl UnetClient {
@@ -77,19 +78,23 @@ impl UnetClient {
             sequence: 0,
             previous: Instant::now(),
             lag: 0,
+            terminate: false,
         };
 
         connecting_dbg(client_id, target.to_socket_addrs().unwrap().next().unwrap());
         Ok(client)
     }
 
-    pub fn update(&mut self) {
+    pub fn update(&mut self) -> bool {
         let now = Instant::now();
         let elapsed = self.previous.elapsed();
 
         self.lag += elapsed.as_millis();
         if self.lag >= self.config.ms_per_tick {
-            self.tick();
+            if !self.tick() {
+                return false;
+            }
+
             self.lag -= self.config.ms_per_tick;
         } else {
             sleep(Duration::from_millis(
@@ -98,9 +103,14 @@ impl UnetClient {
         }
 
         self.previous = now;
+        true
     }
 
-    pub fn tick(&mut self) {
+    pub fn tick(&mut self) -> bool {
+        if self.terminate {
+            return false;
+        }
+
         self.print_state();
         self.receive_packets();
         self.send_packets();
@@ -112,6 +122,8 @@ impl UnetClient {
 
         self.ticks_since_last_packet_sent.value += 1.0;
         self.ticks_since_last_packet_received.value += 1.0;
+
+        true
     }
 
     pub fn send(&mut self, packet: Packet) {
@@ -126,7 +138,7 @@ impl UnetClient {
         packet.set_sequence(self.sequence);
 
         if self.config.send_debug {
-            send_dbg(packet, None);
+            send_dbg(packet, None, None);
         }
 
         let bytes = packet.as_bytes();
@@ -252,9 +264,9 @@ impl UnetClient {
     fn should_send_keep_alive(&self) -> bool {
         self.ticks_since_last_packet_sent >= DEFAULT_KEEP_ALIVE_FREQUENCY
     }
-    
+
     fn exit(&mut self) {
-        println!("SHOULD TERMINATE NOW")
+        self.terminate = true;
     }
 
     fn print_state(&self) {}

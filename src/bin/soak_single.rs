@@ -10,9 +10,8 @@ fn main() {
     config.server_not_responding_timeout = None;
     let mut client = UnetClient::from_config(config).unwrap();
     let mut count = 0;
-    loop {
+    while client.update() {
         client.send(Packet::Data(Data::new(client.id, count)));
-        client.update();
         count += 1;
         sleep(Duration::from_millis(1));
     }

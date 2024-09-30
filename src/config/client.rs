@@ -1,3 +1,4 @@
+use crate::network::VirtualNetwork;
 use crate::packet::UnetId;
 use crate::tick::Tick;
 use crate::{
@@ -5,7 +6,6 @@ use crate::{
     DEFAULT_TPS,
 };
 use std::net::SocketAddr;
-use crate::virtual_network::VirtualNetwork;
 
 #[derive(Debug)]
 pub struct ClientConfig {

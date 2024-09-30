@@ -2,6 +2,8 @@ pub mod connection;
 
 use crate::config::server::ServerConfig;
 use crate::debug::{client_connect_dbg, client_disconnect_dbg, recv_dbg, send_dbg, YELLOW};
+use crate::network::Network;
+use crate::network::Network::{Real, Virtual};
 use crate::packet::disconnect::{Disconnect, DisconnectReason};
 use crate::packet::keep_alive::KeepAlive;
 use crate::packet::Packet;
@@ -14,8 +16,6 @@ use std::io;
 use std::net::{SocketAddr, UdpSocket};
 use std::thread::sleep;
 use std::time::{Duration, Instant};
-use crate::virtual_network::{Network};
-use crate::virtual_network::Network::{Real, Virtual};
 
 #[derive(Debug)]
 pub struct UnetServer {
@@ -37,7 +37,7 @@ impl UnetServer {
             socket.set_nonblocking(true)?;
             Real(socket)
         };
-        
+
         let connections = vec![None; MAX_CONNECTIONS];
 
         let server = Self {
@@ -77,7 +77,7 @@ impl UnetServer {
         self.receive_packets();
         self.handle_packets();
         self.send_packets();
-        self.print_state(); // Ok to re-order this print
+        // self.print_state(); // Ok to re-order this print
         self.kick_timed_out_connections();
         self.kick_spamming_connections();
         self.tick_connections();
@@ -85,22 +85,26 @@ impl UnetServer {
         self.global_tick.value += 1.0;
     }
 
-    fn send_to(
-        &mut self,
-        buf: &[u8],
-        connection_identifier: ConnectionIdentifier,
-    ) -> io::Result<usize> {
-        let to = connection_identifier.addr;
-        if let Some(connection) = self.get_connection(connection_identifier) {
-            connection.still_alive();
-        }
-
+    fn send_to(&mut self, buf: &[u8], to: SocketAddr) -> io::Result<usize> {
         self.network.send_to(buf, to)
     }
 
-    fn send_packet_to(&mut self, packet: Packet, to: ConnectionIdentifier) -> io::Result<usize> {
-        if self.config.send_debug {
-            send_dbg(packet, Some(to));
+    fn send_packet_to(
+        &mut self,
+        packet: Packet,
+        connection_identifier: ConnectionIdentifier,
+    ) -> io::Result<usize> {
+        let send_debug = self.config.send_debug;
+        let to = connection_identifier.addr;
+
+        let mut index = None;
+        if let Some(connection) = self.get_connection(connection_identifier) {
+            connection.still_alive();
+            index = Some(connection.index);
+        }
+
+        if send_debug {
+            send_dbg(packet, Some(connection_identifier), index);
         }
 
         let bytes = packet.as_bytes();

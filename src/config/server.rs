@@ -1,9 +1,9 @@
+use crate::network::VirtualNetwork;
 use crate::{
     Tick, DEFAULT_CLIENT_CONNECTION_TIMEOUT, DEFAULT_KEEP_ALIVE_FREQUENCY, DEFAULT_SERVER_ADDR,
     DEFAULT_TPS,
 };
 use std::net::SocketAddr;
-use crate::virtual_network::VirtualNetwork;
 
 #[derive(Debug)]
 pub struct ServerConfig {

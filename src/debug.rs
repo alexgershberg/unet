@@ -59,8 +59,22 @@ pub fn recv_dbg(
     }
 }
 
-pub fn send_dbg(packet: Packet, connection_identifier: Option<ConnectionIdentifier>) {
-    if let Some(connection_identifier) = connection_identifier {
+pub fn send_dbg(
+    packet: Packet,
+    connection_identifier: Option<ConnectionIdentifier>,
+    index: Option<usize>,
+) {
+    if let (Some(connection_identifier), Some(index)) = (connection_identifier, index) {
+        let id = connection_identifier.id;
+        let to = connection_identifier.addr;
+        println!(
+            "[{}] [{}] [{}] [{:0>3}]: {packet:?}",
+            "send".truecolor(GREEN.r, GREEN.g, GREEN.b),
+            format!("{:0>16x}", id.0).truecolor(BLUE.r, BLUE.g, BLUE.b),
+            to.to_string().truecolor(GREEN.r, GREEN.g, GREEN.b),
+            index.to_string().truecolor(YELLOW.r, YELLOW.g, YELLOW.b)
+        );
+    } else if let Some(connection_identifier) = connection_identifier {
         let id = connection_identifier.id;
         let to = connection_identifier.addr;
         println!(

@@ -34,10 +34,8 @@ fn client_timeout() {
     client.tick();
     println!();
 
-    
     assert_eq!(
         client.state,
         ClientState::Disconnected(DisconnectReason::Timeout)
     );
-    
 }

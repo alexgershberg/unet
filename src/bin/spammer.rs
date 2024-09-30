@@ -9,9 +9,8 @@ fn main() {
 
     let mut client = UnetClient::from_config(config).unwrap();
     let mut count = 0;
-    loop {
+    while client.tick() {
         client.send(Packet::Data(Data::new(client.id, count)));
-        client.tick();
         count += 1;
     }
 }
