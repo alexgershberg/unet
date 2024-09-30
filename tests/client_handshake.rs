@@ -14,28 +14,16 @@ fn client_handshake() {
     let mut client = UnetClient::from_config(client_config).unwrap();
 
     assert_eq!(client.state, ClientState::SendingConnectionRequest);
+    client.tick(); // Client sends ConnectionRequest
+    assert_eq!(client.state, ClientState::SendingConnectionRequest);
 
-    println!("client::tick 1");
-    client.tick();
-    println!();
+    server.tick(); // Server receives ConnectionRequest and responds with ChallengeRequest
 
-    println!("server::tick 1");
-    server.tick();
-    println!();
-
-    println!("client::tick 2");
-    client.tick();
-    println!();
-
+    client.tick(); // Client receives ChallengeRequest and responds with ChallengeResponse
     assert_eq!(client.state, ClientState::SendingConnectionResponse);
 
-    println!("server::tick 2");
-    server.tick();
-    println!();
+    server.tick(); // Server receives ChallengeResponse, the client is now connected, the server responds with a KeepAlive packet
 
-    println!("client::tick 3");
-    client.tick();
-    println!();
-
+    client.tick(); // Client receives KeepAlive, it is now connected
     assert_eq!(client.state, ClientState::Connected);
 }

@@ -166,12 +166,12 @@ impl UnetServer {
 
         match packet {
             Packet::ConnectionRequest(connection_request) => {
-                self.accept_connection(connection_identifier);
+                self.handle_connection_request(connection_identifier);
             }
             Packet::ChallengeResponse(challenge_response) => {
                 let header = challenge_response.header;
                 let connection_identifier = ConnectionIdentifier::new(header.client_id, from);
-                self.send_keep_alive_packet(connection_identifier);
+                self.accept_connection(connection_identifier)
             }
             Packet::Disconnect(disconnect) => {
                 let header = disconnect.header;
@@ -186,18 +186,18 @@ impl UnetServer {
         };
     }
 
-    fn accept_connection(&mut self, connection_identifier: ConnectionIdentifier) -> bool {
+    fn handle_connection_request(&mut self, connection_identifier: ConnectionIdentifier) {
         if self
             .find_client_index_by_connection_identifier(connection_identifier)
             .is_some()
         {
             // Already connected, just ignore
-            return false;
+            return;
         }
 
         let Some(index) = self.find_vacant_space() else {
             self.send_disconnect_packet(connection_identifier, DisconnectReason::ServerFull);
-            return false;
+            return;
         };
 
         let mut connection = Connection::new(connection_identifier);
@@ -206,9 +206,16 @@ impl UnetServer {
         self.connections[index] = Some(connection);
 
         self.send_challenge_packet(connection_identifier);
+    }
 
-        client_connect_dbg(connection_identifier, index);
-        true
+    fn accept_connection(&mut self, connection_identifier: ConnectionIdentifier) {
+        if let Some(connection) = self.get_connection(connection_identifier) {
+            connection.connected = true;
+            client_connect_dbg(connection_identifier, connection.index);
+            self.send_keep_alive_packet(connection_identifier)
+        } else {
+            panic!("Either this is a bug, or someone is sending packets out of order.")
+        }
     }
 
     fn find_client_index_by_connection_identifier(

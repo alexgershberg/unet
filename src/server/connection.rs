@@ -25,6 +25,7 @@ pub struct Connection {
     pub packet_sequence: u64,
     pub index: usize,
     pub client_connection_timeout: Tick,
+    pub connected: bool,
 }
 
 impl Connection {
@@ -33,11 +34,12 @@ impl Connection {
             connection_identifier,
             ticks_since_last_packet_sent: Tick { value: 0.0 },
             ticks_since_last_packet_received: Tick { value: 0.0 },
-            rolling_packets_per_tick_received: RollingAverage::new(100),
+            rolling_packets_per_tick_received: RollingAverage::new(25),
             packets_per_tick_received: 0.0,
             packet_sequence: 0,
             index: 0,
             client_connection_timeout: DEFAULT_CLIENT_CONNECTION_TIMEOUT,
+            connected: false,
         }
     }
     pub fn still_alive(&mut self) {
