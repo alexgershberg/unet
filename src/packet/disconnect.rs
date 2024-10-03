@@ -6,7 +6,7 @@ pub enum DisconnectReason {
     Timeout = 0,
     ServerFull = 1,
     Spam = 2,
-    ConnectionResetByPeer = 3
+    ConnectionResetByPeer = 3,
 }
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]

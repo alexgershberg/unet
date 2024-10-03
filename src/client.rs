@@ -6,17 +6,21 @@ use crate::packet::challenge_response::ChallengeResponse;
 use crate::packet::connection_request::ConnectionRequest;
 use crate::packet::disconnect::{Disconnect, DisconnectReason};
 use crate::packet::keep_alive::KeepAlive;
-use crate::packet::{Packet, UnetId};
+use crate::packet::{Packet, PacketKind, UnetId};
 use crate::tick::Tick;
 use crate::{BUF_SIZE, DEFAULT_KEEP_ALIVE_FREQUENCY, DEFAULT_SERVER_NOT_RESPONDING_TIMEOUT};
 use colored::Colorize;
 use std::collections::VecDeque;
 use std::io;
 use std::net::{SocketAddr, ToSocketAddrs, UdpSocket};
-use std::process::exit;
-use std::sync::mpsc::TryRecvError;
 use std::thread::sleep;
 use std::time::{Duration, Instant};
+
+#[derive(Copy, Clone, Debug, PartialEq)]
+pub enum Action {
+    SendPacket(PacketKind),
+    ReceivePacket(PacketKind),
+}
 
 #[derive(Copy, Clone, Debug, PartialEq)]
 pub enum ClientState {
@@ -30,17 +34,17 @@ pub enum ClientState {
 pub struct UnetClient {
     pub id: UnetId,
     target: SocketAddr,
-    pub server_index: Option<usize>,
     network: Network,
     pub state: ClientState,
     pub send_queue: VecDeque<Packet>,
     pub config: ClientConfig,
-    pub ticks_since_last_packet_sent: Tick,
-    pub ticks_since_last_packet_received: Tick,
-    pub sequence: u64,
-    previous: Instant,
-    lag: u128,
-    terminate: bool,
+    pub ticks_since_last_packet_sent: Tick, // Needed for tracking when to send KeepAlive
+    pub ticks_since_last_packet_received: Tick, // Needed for timing out if server isn't responding
+    pub sequence: u64,                      // Packet sequence
+    previous: Instant,                      // For update() loop
+    lag: u128,                              // For update() loop
+    terminate: bool,                        // For gracefully exiting
+    pub action_trace: Vec<Action>,          // Optional trace for Debugging
 }
 
 impl UnetClient {
@@ -68,7 +72,6 @@ impl UnetClient {
         let client = Self {
             id: client_id,
             target: target.to_socket_addrs().unwrap().next().unwrap(),
-            server_index: None,
             network,
             state: ClientState::SendingConnectionRequest,
             send_queue: VecDeque::new(),
@@ -79,6 +82,7 @@ impl UnetClient {
             previous: Instant::now(),
             lag: 0,
             terminate: false,
+            action_trace: vec![],
         };
 
         connecting_dbg(client_id, target.to_socket_addrs().unwrap().next().unwrap());
@@ -110,10 +114,11 @@ impl UnetClient {
         if self.terminate {
             return false;
         }
+        self.clear_action_trace();
 
-        self.print_state();
         self.receive_packets();
         self.send_packets();
+        self.print_state();
 
         if !self.check_server_response_ok() {
             disconnect_dbg(self.id, self.target, "Server not responding".to_string());
@@ -139,6 +144,10 @@ impl UnetClient {
 
         if self.config.send_debug {
             send_dbg(packet, None, None);
+        }
+
+        if self.config.action_trace {
+            self.action_trace.push(Action::SendPacket(packet.kind()))
         }
 
         let bytes = packet.as_bytes();
@@ -181,9 +190,13 @@ impl UnetClient {
                             self.target,
                             "Kicked for spamming the server".to_string(),
                         );
-                    },
+                    }
                     DisconnectReason::ConnectionResetByPeer => {
-                        disconnect_dbg(self.id, self.target, "Connection reset by peer".to_string());
+                        disconnect_dbg(
+                            self.id,
+                            self.target,
+                            "Connection reset by peer".to_string(),
+                        );
                     }
                 }
                 self.exit()
@@ -202,9 +215,12 @@ impl UnetClient {
     pub fn send_keep_alive_packet(&mut self) -> io::Result<usize> {
         self.send_packet(Packet::KeepAlive(KeepAlive::new(self.id)))
     }
-    
+
     pub fn send_disconnect_packet(&mut self) -> io::Result<usize> {
-        self.send_packet(Packet::Disconnect(Disconnect::new(self.id, DisconnectReason::ConnectionResetByPeer)))
+        self.send_packet(Packet::Disconnect(Disconnect::new(
+            self.id,
+            DisconnectReason::ConnectionResetByPeer,
+        )))
     }
 
     fn receive(&self, buf: &mut [u8]) -> Option<usize> {
@@ -221,6 +237,10 @@ impl UnetClient {
 
     fn receive_packets(&mut self) {
         while let Some(packet) = self.receive_packet() {
+            if self.config.action_trace {
+                self.action_trace.push(Action::ReceivePacket(packet.kind()))
+            }
+
             self.handle_packet(packet);
         }
     }
@@ -277,6 +297,10 @@ impl UnetClient {
     }
 
     fn print_state(&self) {}
+
+    fn clear_action_trace(&mut self) {
+        self.action_trace.clear()
+    }
 }
 
 pub fn connecting_dbg(id: UnetId, to: SocketAddr) {

@@ -29,14 +29,53 @@ impl Default for UnetId {
 }
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
-#[repr(u8)]
-pub enum Packet {
-    ConnectionRequest(ConnectionRequest) = 0,
+#[repr(usize)]
+pub enum PacketKind {
+    ConnectionRequest = 0,
     ChallengeRequest = 1,
-    ChallengeResponse(ChallengeResponse) = 2,
-    KeepAlive(KeepAlive) = 3,
-    Data(Data) = 4,
-    Disconnect(Disconnect) = 5,
+    ChallengeResponse = 2,
+    KeepAlive = 3,
+    Data = 4,
+    Disconnect = 5,
+    Unimplemented,
+}
+impl PacketKind {
+    pub fn from_byte(byte: u8) -> Self {
+        match byte {
+            0 => PacketKind::ConnectionRequest,
+            1 => PacketKind::ChallengeRequest,
+            2 => PacketKind::ChallengeResponse,
+            3 => PacketKind::KeepAlive,
+            4 => PacketKind::Data,
+            5 => PacketKind::Disconnect,
+            _ => PacketKind::Unimplemented,
+        }
+    }
+
+    pub fn as_byte(&self) -> u8 {
+        match self {
+            PacketKind::ConnectionRequest => 0,
+            PacketKind::ChallengeRequest => 1,
+            PacketKind::ChallengeResponse => 2,
+            PacketKind::KeepAlive => 3,
+            PacketKind::Data => 4,
+            PacketKind::Disconnect => 5,
+            PacketKind::Unimplemented => {
+                panic!("Tried calling as_byte() on PacketKind::Unimplemented")
+            }
+        }
+    }
+}
+
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+#[repr(usize)]
+pub enum Packet {
+    ConnectionRequest(ConnectionRequest),
+    ChallengeRequest,
+    ChallengeResponse(ChallengeResponse),
+    KeepAlive(KeepAlive),
+    Data(Data),
+    Disconnect(Disconnect),
     Unimplemented,
 }
 
@@ -47,23 +86,25 @@ impl Packet {
             return None;
         }
 
-        let packet_type = bytes[0];
-        let packet = match packet_type {
-            0 => {
+        let packet_kind = PacketKind::from_byte(bytes[0]);
+        let packet = match packet_kind {
+            PacketKind::ConnectionRequest => {
                 let connection_request = ConnectionRequest::from_bytes(&bytes[1..]);
                 Packet::ConnectionRequest(connection_request)
             }
-            1 => Packet::ChallengeRequest,
-            2 => Packet::ChallengeResponse(ChallengeResponse::from_bytes(&bytes[1..])),
-            3 => {
+            PacketKind::ChallengeRequest => Packet::ChallengeRequest,
+            PacketKind::ChallengeResponse => {
+                Packet::ChallengeResponse(ChallengeResponse::from_bytes(&bytes[1..]))
+            }
+            PacketKind::KeepAlive => {
                 let keep_alive = KeepAlive::from_bytes(&bytes[1..]);
                 Packet::KeepAlive(keep_alive)
             }
-            4 => {
+            PacketKind::Data => {
                 let data = Data::from_bytes(&bytes[1..]);
                 Packet::Data(data)
             }
-            5 => {
+            PacketKind::Disconnect => {
                 let disconnect = Disconnect::from_bytes(&bytes[1..]);
                 Packet::Disconnect(disconnect)
             }
@@ -74,7 +115,7 @@ impl Packet {
     }
 
     pub fn as_bytes(&self) -> Vec<u8> {
-        let mut output = vec![self.packet_id()];
+        let mut output = vec![self.kind().as_byte()];
         match self {
             Packet::ConnectionRequest(connection_request) => {
                 let mut bytes = connection_request.as_bytes();
@@ -103,15 +144,15 @@ impl Packet {
         output
     }
 
-    pub fn packet_id(&self) -> u8 {
+    pub fn kind(&self) -> PacketKind {
         match self {
-            Packet::ConnectionRequest(_) => 0,
-            Packet::ChallengeRequest => 1,
-            Packet::ChallengeResponse(_) => 2,
-            Packet::KeepAlive(_) => 3,
-            Packet::Data(_) => 4,
-            Packet::Disconnect(_) => 5,
-            Packet::Unimplemented => 6,
+            Packet::ConnectionRequest(_) => PacketKind::ConnectionRequest,
+            Packet::ChallengeRequest => PacketKind::ChallengeRequest,
+            Packet::ChallengeResponse(_) => PacketKind::ChallengeResponse,
+            Packet::KeepAlive(_) => PacketKind::KeepAlive,
+            Packet::Data(_) => PacketKind::Data,
+            Packet::Disconnect(_) => PacketKind::Disconnect,
+            Packet::Unimplemented => PacketKind::Unimplemented,
         }
     }
 

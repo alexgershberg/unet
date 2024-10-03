@@ -18,6 +18,7 @@ pub struct ClientConfig {
     pub ms_per_tick: u128,
     pub recv_debug: bool,
     pub send_debug: bool,
+    pub action_trace: bool,
 }
 
 impl ClientConfig {
@@ -30,6 +31,7 @@ impl ClientConfig {
 
         let recv_debug = false;
         let send_debug = false;
+        let action_trace = false;
 
         Self {
             virtual_network: None,
@@ -41,6 +43,7 @@ impl ClientConfig {
             ms_per_tick,
             recv_debug,
             send_debug,
+            action_trace,
         }
     }
 
