@@ -4,7 +4,7 @@ use crate::network::Network::{Real, Virtual};
 use crate::network::{Network, VirtualNetwork};
 use crate::packet::challenge_response::ChallengeResponse;
 use crate::packet::connection_request::ConnectionRequest;
-use crate::packet::disconnect::DisconnectReason;
+use crate::packet::disconnect::{Disconnect, DisconnectReason};
 use crate::packet::keep_alive::KeepAlive;
 use crate::packet::{Packet, UnetId};
 use crate::tick::Tick;
@@ -134,7 +134,7 @@ impl UnetClient {
         self.network.send(buf)
     }
 
-    fn send_packet(&mut self, mut packet: Packet) -> io::Result<usize> {
+    pub fn send_packet(&mut self, mut packet: Packet) -> io::Result<usize> {
         packet.set_sequence(self.sequence);
 
         if self.config.send_debug {
@@ -181,6 +181,9 @@ impl UnetClient {
                             self.target,
                             "Kicked for spamming the server".to_string(),
                         );
+                    },
+                    DisconnectReason::ConnectionResetByPeer => {
+                        disconnect_dbg(self.id, self.target, "Connection reset by peer".to_string());
                     }
                 }
                 self.exit()
@@ -198,6 +201,10 @@ impl UnetClient {
 
     pub fn send_keep_alive_packet(&mut self) -> io::Result<usize> {
         self.send_packet(Packet::KeepAlive(KeepAlive::new(self.id)))
+    }
+    
+    pub fn send_disconnect_packet(&mut self) -> io::Result<usize> {
+        self.send_packet(Packet::Disconnect(Disconnect::new(self.id, DisconnectReason::ConnectionResetByPeer)))
     }
 
     fn receive(&self, buf: &mut [u8]) -> Option<usize> {

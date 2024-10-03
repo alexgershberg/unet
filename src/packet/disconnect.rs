@@ -6,6 +6,7 @@ pub enum DisconnectReason {
     Timeout = 0,
     ServerFull = 1,
     Spam = 2,
+    ConnectionResetByPeer = 3
 }
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
@@ -20,6 +21,7 @@ impl DisconnectReason {
             0 => Self::Timeout,
             1 => Self::ServerFull,
             2 => Self::Spam,
+            3 => Self::ConnectionResetByPeer,
             _ => panic!("Badly formed DisconnectReason value: {byte}"),
         }
     }
