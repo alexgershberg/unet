@@ -1,13 +1,15 @@
-use crate::network::VirtualNetwork;
+use crate::network::{VirtualNetworkV1, VirtualNetworkV2};
 use crate::{
     Tick, DEFAULT_CLIENT_CONNECTION_TIMEOUT, DEFAULT_KEEP_ALIVE_FREQUENCY, DEFAULT_SERVER_ADDR,
     DEFAULT_TPS,
 };
 use std::net::SocketAddr;
+use std::rc::Rc;
+use std::sync::{Arc, Mutex};
 
 #[derive(Debug)]
 pub struct ServerConfig {
-    pub virtual_network: Option<VirtualNetwork>,
+    pub virtual_network: Option<Arc<Mutex<VirtualNetworkV2>>>,
     pub addr: SocketAddr,
     pub client_connection_timeout: Tick,
     pub keep_alive_frequency: Tick,

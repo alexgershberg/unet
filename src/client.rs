@@ -1,7 +1,7 @@
 use crate::config::client::ClientConfig;
 use crate::debug::{recv_dbg, send_dbg, BLUE};
-use crate::network::Network::{Real, Virtual};
-use crate::network::{Network, VirtualNetwork};
+use crate::network::UnetSocket::{Real, Virtual};
+use crate::network::{UnetSocket, VirtualNetwork, VirtualNetworkV1};
 use crate::packet::challenge_response::ChallengeResponse;
 use crate::packet::connection_request::ConnectionRequest;
 use crate::packet::disconnect::{Disconnect, DisconnectReason};
@@ -34,7 +34,7 @@ pub enum ClientState {
 pub struct UnetClient {
     pub id: UnetId,
     target: SocketAddr,
-    network: Network,
+    socket: UnetSocket,
     pub state: ClientState,
     pub send_queue: VecDeque<Packet>,
     pub config: ClientConfig,
@@ -55,8 +55,11 @@ impl UnetClient {
     pub fn from_config(mut config: ClientConfig) -> io::Result<Self> {
         let target = config.target;
 
-        let network = if let Some(virtual_network) = config.virtual_network.take() {
-            Virtual(virtual_network)
+        let socket = if let Some(virtual_network) = config.virtual_network.clone() {
+            let virtual_network = virtual_network.lock().unwrap();
+            let mut socket = virtual_network.bind("0.0.0.0:0".parse().unwrap()).unwrap();
+            socket.connect(target);
+            Virtual(socket)
         } else {
             let socket = UdpSocket::bind("0.0.0.0:0")?;
             socket.set_nonblocking(true)?;
@@ -72,7 +75,7 @@ impl UnetClient {
         let client = Self {
             id: client_id,
             target: target.to_socket_addrs().unwrap().next().unwrap(),
-            network,
+            socket,
             state: ClientState::SendingConnectionRequest,
             send_queue: VecDeque::new(),
             config,
@@ -136,7 +139,7 @@ impl UnetClient {
     }
 
     fn internal_send(&mut self, buf: &[u8]) -> io::Result<usize> {
-        self.network.send(buf)
+        self.socket.send(buf)
     }
 
     pub fn send_packet(&mut self, mut packet: Packet) -> io::Result<usize> {
@@ -224,7 +227,7 @@ impl UnetClient {
     }
 
     fn receive(&self, buf: &mut [u8]) -> Option<usize> {
-        let (n, _from) = self.network.recv_from(buf)?;
+        let (n, _from) = self.socket.recv_from(buf)?;
         Some(n)
     }
 

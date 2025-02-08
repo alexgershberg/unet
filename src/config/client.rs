@@ -1,4 +1,4 @@
-use crate::network::VirtualNetwork;
+use crate::network::{VirtualNetwork, VirtualNetworkV1, VirtualNetworkV2};
 use crate::packet::UnetId;
 use crate::tick::Tick;
 use crate::{
@@ -6,10 +6,11 @@ use crate::{
     DEFAULT_TPS,
 };
 use std::net::SocketAddr;
+use std::sync::{Arc, Mutex};
 
 #[derive(Debug)]
 pub struct ClientConfig {
-    pub virtual_network: Option<VirtualNetwork>,
+    pub virtual_network: Option<Arc<Mutex<VirtualNetworkV2>>>,
     pub id: Option<UnetId>,
     pub target: SocketAddr,
     pub server_not_responding_timeout: Option<Tick>,

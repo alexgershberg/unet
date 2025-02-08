@@ -2,8 +2,8 @@ pub mod connection;
 
 use crate::config::server::ServerConfig;
 use crate::debug::{client_connect_dbg, client_disconnect_dbg, recv_dbg, send_dbg, YELLOW};
-use crate::network::Network;
-use crate::network::Network::{Real, Virtual};
+use crate::network::UnetSocket;
+use crate::network::UnetSocket::{Real, Virtual};
 use crate::packet::disconnect::{Disconnect, DisconnectReason};
 use crate::packet::keep_alive::KeepAlive;
 use crate::packet::Packet;
@@ -19,7 +19,7 @@ use std::time::{Duration, Instant};
 
 #[derive(Debug)]
 pub struct UnetServer {
-    network: Network,
+    socket: UnetSocket,
     pub connections: Vec<Option<Connection>>,
     receive_buffer: VecDeque<(Packet, SocketAddr)>,
     config: ServerConfig,
@@ -29,9 +29,11 @@ pub struct UnetServer {
 }
 
 impl UnetServer {
-    pub fn from_config(mut config: ServerConfig) -> io::Result<Self> {
-        let network = if let Some(virtual_network) = config.virtual_network.take() {
-            Virtual(virtual_network)
+    pub fn from_config(config: ServerConfig) -> io::Result<Self> {
+        let socket = if let Some(virtual_network) = config.virtual_network.clone() {
+            let virtual_network = virtual_network.lock().unwrap();
+            let socket = virtual_network.bind(config.addr).unwrap();
+            Virtual(socket)
         } else {
             let socket = UdpSocket::bind(config.addr)?;
             socket.set_nonblocking(true)?;
@@ -41,7 +43,7 @@ impl UnetServer {
         let connections = vec![None; MAX_CONNECTIONS];
 
         let server = Self {
-            network,
+            socket,
             connections,
             receive_buffer: VecDeque::new(),
             config,
@@ -86,7 +88,7 @@ impl UnetServer {
     }
 
     fn send_to(&mut self, buf: &[u8], to: SocketAddr) -> io::Result<usize> {
-        self.network.send_to(buf, to)
+        self.socket.send_to(buf, to)
     }
 
     fn send_packet_to(
@@ -120,7 +122,7 @@ impl UnetServer {
     }
 
     fn receive(&self, buf: &mut [u8]) -> Option<(usize, SocketAddr)> {
-        self.network.recv_from(buf)
+        self.socket.recv_from(buf)
     }
 
     fn receive_packet(&self) -> Option<(Packet, SocketAddr)> {
